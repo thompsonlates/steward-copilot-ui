@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Microsoft Sign-In</title>
+  </head>
+  <body>
+    <script type="module">
+      import { broadcastResponseToMainFrame }
+        from "@azure/msal-browser/redirect-bridge";
+
+      broadcastResponseToMainFrame();
+    </script>
+  </body>
+</html>
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Microsoft Sign-In</title>
+  </head>
+  <body>
+    <p>Processing authentication...</p>
+
+    <script
+      type="module"
+      src="/src/auth-redirect.ts"
+    ></script>
+  </body>
+</html>

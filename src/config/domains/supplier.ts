@@ -1,0 +1,37 @@
+export const supplierDomainConfig = {
+  domain: "SUPPLIER" as const,
+  memberIdLabel: "Supplier ID",
+  rulePresets: [
+    "SUPPLIER_NAME_SIMILAR",
+    "ADDRESS_MATCH",
+    "PHONE_MATCH",
+    "CONTACT_EMAIL_MATCH",
+    "SUPPLIER_ID_EXACT",
+  ],
+  overrideReasons: [
+    "SUPPLIER_NAME_COLLISION",
+    "TAX_ID_MISMATCH",
+    "ADDRESS_MISMATCH",
+    "CONTACT_MISMATCH",
+    "DUPLICATE_SITE_CONFUSION",
+    "INSUFFICIENT_EVIDENCE",
+    "POLICY_EXCEPTION",
+    "OTHER",
+  ],
+  fieldLabels: {
+    first: "supplier_name_line_1",
+    last: "supplier_name_line_2",
+    dob: "tax_id",
+    email: "contact_email",
+    address: "supplier_address",
+  },
+  signalLabels: {
+    ENTITY_ID_MATCH: "Supplier ID Match",
+    NAME_SIMILARITY: "Supplier Name Similarity",
+    DOB_MATCH: "Tax ID Match",
+    TAX_ID_MATCH: "Tax ID Match",
+    EMAIL_MATCH: "Supplier Contact Email Match",
+    ADDRESS_MATCH: "Supplier Address Match",
+    PHONE_MATCH: "Phone Match",
+  },
+} as const;

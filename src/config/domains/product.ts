@@ -1,0 +1,35 @@
+export const productDomainConfig = {
+  domain: "PRODUCT" as const,
+  memberIdLabel: "Product ID",
+  rulePresets: [
+    "GTIN_MATCH",
+    "SKU_MATCH",
+    "PRODUCT_NAME_SIMILAR",
+    "DESCRIPTION_SIMILAR",
+    "UOM_MATCH",
+  ],
+  overrideReasons: [
+    "GTIN_MISMATCH",
+    "SKU_MISMATCH",
+    "BRAND_MISMATCH",
+    "DESCRIPTION_CONFLICT",
+    "UOM_MISMATCH",
+    "PACK_SIZE_MISMATCH",
+    "INSUFFICIENT_EVIDENCE",
+    "POLICY_EXCEPTION",
+    "OTHER",
+  ],
+  fieldLabels: {
+    first: "Product Name",
+    email: "GTIN",
+    last: "Product Variant / Pack Size",
+    dob: "Item Category",
+    address: "SKU",
+  },
+  signalLabels: {
+    ENTITY_ID_MATCH: "Product ID Match",
+    NAME_SIMILARITY: "Product Name Similarity",
+    GTIN_MATCH: "GTIN Match",
+    SKU_MATCH: "SKU Match",
+  },
+} as const;
