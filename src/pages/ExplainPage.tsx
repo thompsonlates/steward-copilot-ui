@@ -65,7 +65,6 @@ const DOMAIN_OPTIONS: DomainType[] = [
   "CUSTOMER",
   "SUPPLIER",
   "PRODUCT",
-  "OTHER",
   "BANKING",
   "PATIENT",
   "PROVIDER",
@@ -338,11 +337,18 @@ function getMemberIdLabel(domain: DomainType): string {
     
     case "BANKING":
       return "Account ID";
+
     default:
       return "Record ID";
       
     case "OTHER":
       return "Entity ID";
+
+    case "LOCATION":
+      return "Location ID";
+
+    case "ORGANIZATION":
+      return "Organization ID";
   }
 
 }
@@ -525,7 +531,7 @@ function getAutomationReadinessFallback(
 function getDomainFieldLabels(domain: DomainType) {
   switch (domain) {
       case "CUSTOMER":
-      return {
+        return {
         first: "Full Name",
         dob: "DOB (YYYY-MM-DD)",
         email: "Email",
@@ -533,8 +539,8 @@ function getDomainFieldLabels(domain: DomainType) {
         address: "Address",
   };
 
-  case "SUPPLIER":
-      return {
+      case "SUPPLIER":
+        return {
         first: "supplier_name_line_1",
         last: "supplier_name_line_2",
         dob: "tax_id",
@@ -542,61 +548,79 @@ function getDomainFieldLabels(domain: DomainType) {
         address: "supplier_address",
       };
       
-  case "PRODUCT":
-  return {
-    first: "Product Name",
-    email: "GTIN",
-    last: "Product Variant / Pack Size",
-    dob: "Item Category",
-    address: "SKU",
-  };
-
- case "PROVIDER":
-  return {
-    first: "provider_first_name",
-    last: "provider_last_name",
-
-    dob: "Specialty",
-
-    email: "provider_email",
-    address: "provider_address",
-
-    providerId: "provider_id",
-    phoneNumber: "phone_number",
-    npi: "npi",
-};
-
-  case "PATIENT":
-    return {
-      first: "First Name",
-      last: "Last Name",
-      dob: "DOB (YYYY-MM-DD)",
-      email: "Email",
-      phoneNumber: "Phone Number",
-      humanId: "Human ID",
-      address: "Address",
-  };
-
-    case "BANKING":
-    return {
-      first: "Banking Customer ID",
-      last: "SAP Business Partner ID",
-      dob: "Routing Number",
-      email: "Email",
-      phoneNumber: "Phone Number",
-      address: "Institution Name",
-      sourceSystem: "Source System",
-    };
-
-  case "OTHER":
-    default:
-      return {
-        first: "name_line_1",
-        last: "name_line_2",
-        dob: "date / reference",
-        email: "email / identifier",
-        address: "address / descriptor",
+      case "PRODUCT":
+        return {
+        first: "Product Name",
+        email: "GTIN",
+        last: "Product Variant / Pack Size",
+        dob: "Item Category",
+        address: "SKU",
       };
+
+      case "PROVIDER":
+        return {
+          first: "provider_first_name",
+          last: "provider_last_name",
+
+          dob: "Specialty",
+
+          email: "provider_email",
+          address: "provider_address",
+
+          providerId: "provider_id",
+          phoneNumber: "phone_number",
+          npi: "npi",
+      };
+
+      case "PATIENT":
+          return {
+            first: "First Name",
+            last: "Last Name",
+            dob: "DOB (YYYY-MM-DD)",
+            email: "Email",
+            phoneNumber: "Phone Number",
+            humanId: "Human ID",
+            address: "Address",
+        };
+
+      case "BANKING":
+          return {
+            first: "Banking Customer ID",
+            last: "SAP Business Partner ID",
+            dob: "Routing Number",
+            email: "Email",
+            phoneNumber: "Phone Number",
+            address: "Institution Name",
+            sourceSystem: "Source System",
+          };
+
+      case "OTHER":
+        default:
+          return {
+            first: "name_line_1",
+            last: "name_line_2",
+            dob: "date / reference",
+            email: "email / identifier",
+            address: "address / descriptor",
+          };
+
+      case "LOCATION":
+        return {
+          first: "Location Name",
+          last: "Location Type",
+          dob: "Location Code / Site ID",
+          email: "Organization Entity ID",
+          address: "Location Address",
+        };
+
+      case "ORGANIZATION":
+        return {
+          first: "Organization Name",
+          last: "Organization Type",
+          dob: "Organization Code",
+          email: "Parent Organization ID",
+          address: "Organization Status",
+        };
   }
 }
 
@@ -838,6 +862,15 @@ export default function ExplainPage({
   const [a_currency, setA_currency] = useState("");
   const [a_account_status, setA_account_status] = useState("");
 
+  // LOCATION domain state - Record A
+  const [a_location_id, setA_location_id] = useState("");
+  const [a_site_id, setA_site_id] = useState("");
+  const [a_location_code, setA_location_code] = useState("");
+  const [a_location_name, setA_location_name] = useState("");
+  const [a_location_type, setA_location_type] = useState("");
+  const [a_location_address, setA_location_address] = useState("");
+  const [a_parent_location_id, setA_parent_location_id] = useState("");
+
   const [b_member_id, setB_member_id] = useState("");
   const [b_first, setB_first] = useState("");
   const [b_last, setB_last] = useState("");
@@ -852,6 +885,14 @@ export default function ExplainPage({
   const [b_account_number_last4, setB_account_number_last4] = useState("");
   const [b_currency, setB_currency] = useState("");
   const [b_account_status, setB_account_status] = useState("");
+  // LOCATION domain state - Record B
+  const [b_location_id, setB_location_id] = useState("");
+  const [b_site_id, setB_site_id] = useState("");
+  const [b_location_code, setB_location_code] = useState("");
+  const [b_location_name, setB_location_name] = useState("");
+  const [b_location_type, setB_location_type] = useState("");
+  const [b_location_address, setB_location_address] = useState("");
+  const [b_parent_location_id, setB_parent_location_id] = useState("");
 
   useEffect(() => {
     if (!rulesDirty) {
@@ -1060,13 +1101,38 @@ const payload: MatchExplainRequest = {
           sap_business_partner_id: a_last.trim() || undefined,
           routing_number: a_dob.trim() || undefined,
           account_number_last4:
-            a_account_number_last4.trim() || undefined,
+          a_account_number_last4.trim() || undefined,
           institution_name: a_address.trim() || undefined,
           account_type: a_account_type.trim() || undefined,
           currency: a_currency.trim() || undefined,
           account_status: a_account_status.trim() || undefined,
           email: a_email.trim() || undefined,
           phone_number: a_phone.trim() || undefined,
+          source_system: a_source_system.trim() || undefined,
+        }
+
+      : domain === "ORGANIZATION"
+      ? {
+          member_id: a_member_id.trim(),
+          organization_entity_id: a_member_id.trim() || undefined,
+          organization_code: a_dob.trim() || undefined,
+          organization_name: a_first.trim() || undefined,
+          organization_type: a_last.trim() || undefined,
+          parent_organization_id: a_email.trim() || undefined,
+          organization_status: a_address.trim() || undefined,
+          source_system: a_source_system.trim() || undefined,
+        }
+
+            : domain === "LOCATION"
+      ? {
+          member_id: a_location_id.trim(),
+          location_id: a_location_id.trim() || undefined,
+          site_id: a_site_id.trim() || undefined,
+          location_code: a_location_code.trim() || undefined,
+          location_name: a_location_name.trim() || undefined,
+          location_type: a_location_type.trim() || undefined,
+          location_address: a_location_address.trim() || undefined,
+          parent_location_id: a_parent_location_id.trim() || undefined,
           source_system: a_source_system.trim() || undefined,
         }
       : {
@@ -1138,7 +1204,7 @@ const payload: MatchExplainRequest = {
           source_system: b_source_system.trim() || undefined,
         }
 
-      : domain === "BANKING"
+    : domain === "BANKING"
       ? {
           member_id: "",
           account_id: b_member_id.trim() || undefined,
@@ -1155,6 +1221,32 @@ const payload: MatchExplainRequest = {
           phone_number: b_phone.trim() || undefined,
           source_system: b_source_system.trim() || undefined,
         }
+
+    : domain === "ORGANIZATION"
+    ? {
+        member_id: b_member_id.trim(),
+        organization_entity_id: b_member_id.trim() || undefined,
+        organization_code: b_dob.trim() || undefined,
+        organization_name: b_first.trim() || undefined,
+        organization_type: b_last.trim() || undefined,
+        parent_organization_id: b_email.trim() || undefined,
+        organization_status: b_address.trim() || undefined,
+        source_system: b_source_system.trim() || undefined,
+      }
+
+    : domain === "LOCATION"
+    ? {
+        member_id: b_location_id.trim(),
+        location_id: b_location_id.trim() || undefined,
+        site_id: b_site_id.trim() || undefined,
+        location_code: b_location_code.trim() || undefined,
+        location_name: b_location_name.trim() || undefined,
+        location_type: b_location_type.trim() || undefined,
+        location_address: b_location_address.trim() || undefined,
+        parent_location_id: b_parent_location_id.trim() || undefined,
+        source_system: b_source_system.trim() || undefined,
+      }
+
       : {
           member_id: b_member_id.trim(),
           full_name: b_first.trim() || undefined,
@@ -1169,9 +1261,8 @@ const payload: MatchExplainRequest = {
           match_score: Number(matchScore),
           requested_by: requestedBy,
           triggered_rules: effectiveTriggeredRules,
+
     };
-
-
          
 
 try {
@@ -1268,6 +1359,14 @@ function clearResult() {
   setA_account_type("");
   setA_currency("");
   setA_account_status("");
+  // Clear LOCATION Record A
+  setA_location_id("");
+  setA_site_id("");
+  setA_location_code("");
+  setA_location_name("");
+  setA_location_type("");
+  setA_location_address("");
+  setA_parent_location_id("");
 
   // Clear Record B
   setB_member_id("");
@@ -1284,6 +1383,14 @@ function clearResult() {
   setB_account_type("");
   setB_currency("");
   setB_account_status("");
+  // Clear LOCATION Record B
+  setB_location_id("");
+  setB_site_id("");
+  setB_location_code("");
+  setB_location_name("");
+  setB_location_type("");
+  setB_location_address("");
+  setB_parent_location_id("");
 
   // Clear Results
   setResult(null);
@@ -1444,6 +1551,60 @@ return (
                 label={`Select Existing ${domain.charAt(0) + domain.slice(1).toLowerCase()} Record`}
                onSelect={(r) => {
   const rec = r.record ?? {};
+
+    if (domain === "LOCATION") {
+    setA_location_id(
+      rec.location_id ??
+      r.record_id ??
+      ""
+    );
+    setA_site_id(rec.site_id ?? "");
+    setA_location_code(rec.location_code ?? "");
+    setA_location_name(rec.location_name ?? "");
+    setA_location_type(rec.location_type ?? "");
+    setA_location_address(rec.location_address ?? "");
+    setA_parent_location_id(rec.parent_location_id ?? "");
+    setA_source_system(
+      rec.source_system ??
+      r.source_system ??
+      ""
+    );
+    return;
+  }
+
+    if (domain === "ORGANIZATION") {
+    setA_member_id(
+      rec.organization_entity_id ??
+      r.record_id ??
+      ""
+    );
+    setA_dob(
+      rec.organization_code ??
+      ""
+    );
+    setA_first(
+      rec.organization_name ??
+      ""
+    );
+    setA_last(
+      rec.organization_type ??
+      ""
+    );
+    setA_email(
+      rec.parent_organization_id ??
+      ""
+    );
+    setA_address(
+      rec.organization_status ??
+      ""
+    );
+    setA_source_system(
+      rec.source_system ??
+      r.source_system ??
+      ""
+    );
+    return;
+  }
 
   if (domain === "PRODUCT") {
     setA_member_id(rec.product_id ?? r.record_id ?? "");
@@ -1634,6 +1795,20 @@ setA_source_system(
                 ? setA_account_status
                 : undefined
             }
+            locationId={domain === "LOCATION" ? a_location_id : undefined}
+            setLocationId={domain === "LOCATION" ? setA_location_id : undefined}
+            siteId={domain === "LOCATION" ? a_site_id : undefined}
+            setSiteId={domain === "LOCATION" ? setA_site_id : undefined}
+            locationCode={domain === "LOCATION" ? a_location_code : undefined}
+            setLocationCode={domain === "LOCATION" ? setA_location_code : undefined}
+            locationName={domain === "LOCATION" ? a_location_name : undefined}
+            setLocationName={domain === "LOCATION" ? setA_location_name : undefined}
+            locationType={domain === "LOCATION" ? a_location_type : undefined}
+            setLocationType={domain === "LOCATION" ? setA_location_type : undefined}
+            locationAddress={domain === "LOCATION" ? a_location_address : undefined}
+            setLocationAddress={domain === "LOCATION" ? setA_location_address : undefined}
+            parentLocationId={domain === "LOCATION" ? a_parent_location_id : undefined}
+            setParentLocationId={domain === "LOCATION" ? setA_parent_location_id : undefined}
             
             humanId={showHumanId ? a_human_id : undefined}
             setHumanId={showHumanId ? setA_human_id : undefined}
@@ -1649,7 +1824,60 @@ setA_source_system(
                 label={`Select Existing ${domain.charAt(0) + domain.slice(1).toLowerCase()} Record`}
                 onSelect={(r) => {
   const rec = r.record ?? {};
-  
+    
+    if (domain === "LOCATION") {
+    setB_location_id(
+      rec.location_id ??
+      r.record_id ??
+      ""
+    );
+    setB_site_id(rec.site_id ?? "");
+    setB_location_code(rec.location_code ?? "");
+    setB_location_name(rec.location_name ?? "");
+    setB_location_type(rec.location_type ?? "");
+    setB_location_address(rec.location_address ?? "");
+    setB_parent_location_id(rec.parent_location_id ?? "");
+    setB_source_system(
+      rec.source_system ??
+      r.source_system ??
+      ""
+    );
+    return;
+  }
+
+    if (domain === "ORGANIZATION") {
+    setB_member_id(
+      rec.organization_entity_id ??
+      r.record_id ??
+      ""
+    );
+    setB_dob(
+      rec.organization_code ??
+      ""
+    );
+    setB_first(
+      rec.organization_name ??
+      ""
+    );
+    setB_last(
+      rec.organization_type ??
+      ""
+    );
+    setB_email(
+      rec.parent_organization_id ??
+      ""
+    );
+    setB_address(
+      rec.organization_status ??
+      ""
+    );
+    setB_source_system(
+      rec.source_system ??
+      r.source_system ??
+      ""
+    );
+    return;
+  }
 
   if (domain === "PRODUCT") {
     setB_member_id(rec.product_id ?? r.record_id ?? "");
@@ -1764,6 +1992,20 @@ setB_source_system(
             entityIdLabel={getMemberIdLabel(domain)}
             npi={domain === "PROVIDER" ? b_npi : undefined}
             setNpi={domain === "PROVIDER" ? setB_npi : undefined}
+            locationId={domain === "LOCATION" ? b_location_id : undefined}
+            setLocationId={domain === "LOCATION" ? setB_location_id : undefined}
+            siteId={domain === "LOCATION" ? b_site_id : undefined}
+            setSiteId={domain === "LOCATION" ? setB_site_id : undefined}
+            locationCode={domain === "LOCATION" ? b_location_code : undefined}
+            setLocationCode={domain === "LOCATION" ? setB_location_code : undefined}
+            locationName={domain === "LOCATION" ? b_location_name : undefined}
+            setLocationName={domain === "LOCATION" ? setB_location_name : undefined}
+            locationType={domain === "LOCATION" ? b_location_type : undefined}
+            setLocationType={domain === "LOCATION" ? setB_location_type : undefined}
+            locationAddress={domain === "LOCATION" ? b_location_address : undefined}
+            setLocationAddress={domain === "LOCATION" ? setB_location_address : undefined}
+            parentLocationId={domain === "LOCATION" ? b_parent_location_id : undefined}
+            setParentLocationId={domain === "LOCATION" ? setB_parent_location_id : undefined}
             phoneNumber={
               domain === "CUSTOMER" ||
               domain === "PATIENT" ||
@@ -2117,11 +2359,64 @@ setB_source_system(
             )}
             confidence={engineConfidence}
             riskFlag={result.risk_flag}
-            matchScore={Number(matchScore || 0)}
+            matchScore={Number(result.match_score ?? 0)}
             triggeredRules={triggeredRules}
             overrideRate={getOverrideRateEstimate(result)}
           />
 <RecordCompare
+  authoritativeBands={
+  domain === "ORGANIZATION"
+    ? {
+        organization_name: (() => {
+          const signal = (
+            (result as any)?.entity_resolution_signals ?? []
+          ).find(
+            (item: any) =>
+              String(item?.signal_name ?? "").toLowerCase() ===
+              "organization_name_similarity"
+          );
+
+          const band = String(
+            signal?.signal_band ?? ""
+          ).toUpperCase();
+
+          return ["EXACT", "SIMILAR", "FUZZY", "DIFFERENT"].includes(band)
+            ? (band as "EXACT" | "SIMILAR" | "FUZZY" | "DIFFERENT")
+            : undefined;
+        })(),
+      }
+    : domain === "LOCATION"
+    ? (() => {
+        const signals =
+          (result as any)?.entity_resolution_signals ?? [];
+
+        const getBand = (signalName: string) => {
+          const signal = signals.find(
+            (item: any) =>
+              String(item?.signal_name ?? "").toLowerCase() ===
+              signalName.toLowerCase()
+          );
+
+          const band = String(
+            signal?.signal_band ?? ""
+          ).toUpperCase();
+
+          return ["EXACT", "SIMILAR", "FUZZY", "DIFFERENT"].includes(band)
+            ? (band as "EXACT" | "SIMILAR" | "FUZZY" | "DIFFERENT")
+            : undefined;
+        };
+
+        return {
+          location_id: getBand("location_id_match"),
+          site_id: getBand("site_id_match"),
+          location_code: getBand("location_code_match"),
+          location_name: getBand("location_name_similarity"),
+          location_address: getBand("address_similarity"),
+          parent_location_id: getBand("parent_location_id_match"),
+        };
+      })()
+    : undefined
+}
   recordA={
     domain === "PRODUCT"
       ? {
@@ -2168,6 +2463,29 @@ setB_source_system(
           address: a_address,
           source_system: a_source_system,
         }
+
+      : domain === "LOCATION"
+      ? {
+          location_id: a_location_id,
+          site_id: a_site_id,
+          location_code: a_location_code,
+          location_name: a_location_name,
+          location_type: a_location_type,
+          location_address: a_location_address,
+          parent_location_id: a_parent_location_id,
+          source_system: a_source_system,
+        }
+      : domain === "ORGANIZATION"
+      ? {
+          organization_entity_id: a_member_id,
+          organization_code: a_dob,
+          organization_name: a_first,
+          organization_type: a_last,
+          parent_organization_id: a_email,
+          organization_status: a_address,
+          source_system: a_source_system,
+        }
+      
       : domain === "BANKING"
       ? {
           account_id: a_member_id,
@@ -2240,6 +2558,29 @@ setB_source_system(
           address: b_address,
           source_system: b_source_system,
         }
+
+      : domain === "LOCATION"
+      ? {
+          location_id: b_location_id,
+          site_id: b_site_id,
+          location_code: b_location_code,
+          location_name: b_location_name,
+          location_type: b_location_type,
+          location_address: b_location_address,
+          parent_location_id: b_parent_location_id,
+          source_system: b_source_system,
+        }
+      : domain === "ORGANIZATION"
+      ? {
+          organization_entity_id: b_member_id,
+          organization_code: b_dob,
+          organization_name: b_first,
+          organization_type: b_last,
+          parent_organization_id: b_email,
+          organization_status: b_address,
+          source_system: b_source_system,
+        }
+        
       : domain === "BANKING"
       ? {
           account_id: b_member_id,
@@ -2321,7 +2662,8 @@ setB_source_system(
 />
 
   {domain !== "PRODUCT" &&
-  domain !== "BANKING" && 
+  domain !== "BANKING" &&
+  domain !== "ORGANIZATION" &&
   result && (
   <AddressIntelligencePanel
     recordA={result.record_a_address_intelligence}
@@ -2379,6 +2721,31 @@ setB_source_system(
           address: a_address,
           source_system: a_source_system,
         }
+
+      : domain === "LOCATION"
+      ? {
+          member_id: a_location_id.trim(),
+          location_id: a_location_id.trim(),
+          site_id: a_site_id.trim(),
+          location_code: a_location_code.trim(),
+          location_name: a_location_name.trim(),
+          location_type: a_location_type.trim(),
+          location_address: a_location_address.trim(),
+          address: a_location_address.trim(),
+          parent_location_id: a_parent_location_id.trim(),
+          source_system: a_source_system.trim(),
+        }
+
+      : domain === "ORGANIZATION"
+      ? {
+          organization_entity_id: a_member_id,
+          organization_code: a_dob,
+          organization_name: a_first,
+          organization_type: a_last,
+          parent_organization_id: a_email,
+          organization_status: a_address,
+          source_system: a_source_system,
+        }
       : domain === "BANKING"
       ? {
           account_id: a_member_id,
@@ -2416,6 +2783,7 @@ setB_source_system(
           sku: b_address,
           source_system: b_source_system,
         }
+
       : domain === "PROVIDER"
       ? {
           provider_id: b_member_id,
@@ -2427,6 +2795,7 @@ setB_source_system(
           provider_address: b_address,
           source_system: b_source_system,
         }
+
       : domain === "PATIENT"
       ? {
           patient_id: b_member_id,
@@ -2438,6 +2807,7 @@ setB_source_system(
           patient_address: b_address,
           source_system: b_source_system,
         }
+
       : domain === "SUPPLIER"
       ? {
           supplier_id: b_member_id,
@@ -2450,6 +2820,32 @@ setB_source_system(
           address: b_address,
           source_system: b_source_system,
         }
+
+      : domain === "LOCATION"
+      ? {
+          member_id: b_location_id.trim(),
+          location_id: b_location_id.trim(),
+          site_id: b_site_id.trim(),
+          location_code: b_location_code.trim(),
+          location_name: b_location_name.trim(),
+          location_type: b_location_type.trim(),
+          location_address: b_location_address.trim(),
+          address: b_location_address.trim(),
+          parent_location_id: b_parent_location_id.trim(),
+          source_system: b_source_system.trim(),
+        }
+
+      : domain === "ORGANIZATION"
+      ? {
+          organization_entity_id: b_member_id,
+          organization_code: b_dob,
+          organization_name: b_first,
+          organization_type: b_last,
+          parent_organization_id: b_email,
+          organization_status: b_address,
+          source_system: b_source_system,
+        }
+
       : domain === "BANKING"
       ? {
           account_id: b_member_id,

@@ -15,10 +15,13 @@ import { useEffect, useState } from "react";
 
 
 
+
 import {
   createEnterpriseConnection,
   getEnterpriseConnections,
   testEnterpriseConnection,
+   updateEnterpriseConnectionCapabilities,
+  deleteEnterpriseConnection,
   type ConnectionTestResponse,
 } from "../api/client";
 
@@ -55,6 +58,7 @@ const GOVERNED_EXECUTION_CONNECTORS = new Set<ConnectorId>([
   "databricks",
   "snowflake",
   "bigquery",
+  "azure_sql",
 ]);
 
 type ConnectorField = {
@@ -181,7 +185,13 @@ const INTEGRATIONS: ConnectorDefinition[] = [
         required: true,
       },
       {
-        key: "target_table",
+        key: "warehouse_id",
+        label: "SQL Warehouse ID",
+        placeholder: "Databricks SQL Warehouse ID",
+        required: true,
+      },
+{
+  key: "target_table",
         label: "Target Delta Table",
         placeholder: "ai_steward_results",
         required: true,
@@ -258,6 +268,13 @@ const INTEGRATIONS: ConnectorDefinition[] = [
       },
     ],
     authenticationOptions: [
+      {
+        id: "username_password",
+        title: "Username & Password",
+        description:
+          "Authenticate with a Snowflake user. MFA challenges remain controlled by Snowflake.",
+        badge: "Password",
+      },
       {
         id: "oauth",
         title: "Sign in with Snowflake",
@@ -593,6 +610,25 @@ const INTEGRATIONS: ConnectorDefinition[] = [
     }
 
     if (connectorId === "snowflake") {
+      if (authenticationMethod === "username_password") {
+        return [
+          {
+            key: "username",
+            label: "Snowflake Username",
+            placeholder: "THOMPSONLATES1976",
+            required: true,
+          },
+          {
+            key: "password",
+            label: "Snowflake Password",
+            placeholder: "Enter Snowflake password",
+            required: true,
+            helperText:
+              "Stored securely in Google Secret Manager and never persisted in the connection registry.",
+          },
+        ];
+      }
+
       if (authenticationMethod === "oauth") {
         return [
           {
@@ -987,9 +1023,12 @@ async function startGoogleCloudOAuth(): Promise<void> {
       ? authenticationMethod === "service_account"
         ? "SERVICE_ACCOUNT"
         : "GOOGLE_OAUTH"
-      : connector.id === "snowflake" &&
-          authenticationMethod === "key_pair"
-        ? "KEY_PAIR"
+      : connector.id === "snowflake"
+        ? authenticationMethod === "username_password"
+          ? "USERNAME_PASSWORD"
+          : authenticationMethod === "key_pair"
+            ? "KEY_PAIR"
+            : "OAUTH_CLIENT_CREDENTIALS"
         : connector.id === "mongodb"
           ? "CONNECTION_STRING"
           : connector.id === "azure_sql"
@@ -1022,7 +1061,7 @@ async function startGoogleCloudOAuth(): Promise<void> {
     connectionCapabilities.push("EXECUTE_DQ_REMEDIATION");
   }
 
-  return {
+  const payload: EnterpriseConnectionCreateRequest = {
     connection_name:
       values.connection_name?.trim() ||
       `${connector.name} Connection`,
@@ -1088,6 +1127,13 @@ async function startGoogleCloudOAuth(): Promise<void> {
           ? {
               connection_uri: values.connection_uri?.trim() || null,
             }
+          : connector.id === "snowflake" &&
+              authenticationMethod === "username_password"
+            ? {
+                account:
+                  values.account_identifier?.trim() || null,
+                authenticator: "username_password_mfa",
+              }
           : {},
     },
 
@@ -1099,6 +1145,8 @@ async function startGoogleCloudOAuth(): Promise<void> {
       database: values.database?.trim() || null,
       schema: values.schema?.trim() || null,
       warehouse: values.warehouse?.trim() || null,
+      warehouse_id: values.warehouse_id?.trim() || null,
+      table_name: values.target_table?.trim() || null,
       role: values.role?.trim() || null,
       catalog: values.catalog?.trim() || null,
       project_id:
@@ -1128,7 +1176,18 @@ async function startGoogleCloudOAuth(): Promise<void> {
       "Enterprise",
       "AI Data Steward Copilot",
     ],
-  };
+    };
+
+  console.log("[CONNECTION SAVE DEBUG]", {
+    vendor: payload.vendor,
+    environment: payload.environment,
+    catalog: payload.connection_details?.catalog,
+    schema: payload.connection_details?.schema,
+    warehouse_id: payload.connection_details?.warehouse_id,
+    table_name: payload.connection_details?.table_name,
+  });
+
+  return payload;
 }
 
   async function createConnection(): Promise<void> {
@@ -2605,6 +2664,46 @@ function EnterpriseConnectionsPage({
     }
   }
 
+  async function enableManagedGovernedExecution(): Promise<void> {
+  if (!managedConnection) {
+    return;
+  }
+
+  setManagedTestStatus("TESTING");
+  setManagedTestMessage(null);
+
+  try {
+    const capabilities = Array.from(
+      new Set([
+        ...(managedConnection.connection_capabilities || []),
+        "EXECUTE_DQ_REMEDIATION",
+      ]),
+    );
+
+    const updated =
+      await updateEnterpriseConnectionCapabilities(
+        managedConnection.connection_id,
+        capabilities,
+      );
+
+    setManagedConnection(updated);
+
+    setManagedTestStatus("SUCCESS");
+    setManagedTestMessage(
+      "Governed DQ remediation enabled. Test the connection before execution.",
+    );
+
+    await loadConnections();
+  } catch (error) {
+    setManagedTestStatus("ERROR");
+    setManagedTestMessage(
+      error instanceof Error
+        ? error.message
+        : "Unable to enable governed execution.",
+    );
+  }
+}
+
   async function testManagedConnection(): Promise<void> {
     if (!managedConnection) {
       return;
@@ -2653,23 +2752,40 @@ function EnterpriseConnectionsPage({
   }
 
   async function disconnectManagedConnection(): Promise<void> {
-    if (!managedConnection) {
-      return;
-    }
+  if (!managedConnection) {
+    return;
+  }
 
-    const confirmed = window.confirm(
-      `Disconnect "${managedConnection.connection_name}"?`,
+  const confirmed = window.confirm(
+    `Disconnect "${managedConnection.connection_name}"?`,
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  setManagedTestStatus("TESTING");
+  setManagedTestMessage(null);
+
+  try {
+    await deleteEnterpriseConnection(
+      managedConnection.connection_id,
     );
 
-    if (!confirmed) {
-      return;
-    }
+    setManagedConnection(null);
+    setManagedTestStatus("IDLE");
+    setManagedTestMessage(null);
 
+    await loadConnections();
+  } catch (error) {
     setManagedTestStatus("ERROR");
     setManagedTestMessage(
-      "Disconnect is not yet connected to a backend delete endpoint.",
+      error instanceof Error
+        ? error.message
+        : "Unable to disconnect the enterprise connection.",
     );
   }
+}
 
   function formatActiveLiveCount(count: number): string {
     return `${count} active connection${count === 1 ? "" : "s"}`;
@@ -3446,6 +3562,61 @@ function EnterpriseConnectionsPage({
                     ? "Connection Healthy"
                     : "Test Connection"}
               </button>
+
+              {managedConnection.connection_capabilities?.includes(
+            "EXECUTE_DQ_REMEDIATION",
+          ) ? (
+            <div
+              style={{
+                padding: "12px 18px",
+                borderRadius: 10,
+                border: "1px solid #86efac",
+                background: "#f0fdf4",
+                color: "#166534",
+                fontWeight: 800,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              ✓ Governed Execution Enabled
+            </div>
+          ) : (
+            ["DEV", "STG"].includes(
+              String(managedConnection.environment || "")
+                .trim()
+                .toUpperCase(),
+            ) &&
+            GOVERNED_EXECUTION_CONNECTORS.has(
+              normalizeConnectionVendor(
+                managedConnection.vendor,
+              ).toLowerCase() as ConnectorId,
+            ) && (
+              <button
+                type="button"
+                onClick={() => {
+                  void enableManagedGovernedExecution();
+                }}
+                disabled={managedTestStatus === "TESTING"}
+                style={{
+                  padding: "12px 18px",
+                  borderRadius: 10,
+                  border: "1px solid #bfdbfe",
+                  background: "#eff6ff",
+                  color: "#1d4ed8",
+                  cursor:
+                    managedTestStatus === "TESTING"
+                      ? "not-allowed"
+                      : "pointer",
+                  fontWeight: 800,
+                  opacity:
+                    managedTestStatus === "TESTING" ? 0.65 : 1,
+                }}
+              >
+                Enable Governed Execution
+              </button>
+  )
+)}
 
               <button
                 type="button"

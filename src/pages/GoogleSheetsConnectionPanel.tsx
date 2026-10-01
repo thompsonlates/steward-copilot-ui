@@ -11,10 +11,7 @@ import type {
 import UniversalProfileIntelligence
   from "../components/UniversalProfileIntelligence";
 
-import { getBillingStatus } from "../api/billing";
-
 import {
-  executeGoogleSheetsDqRemediation,
   generateDqRemediation,
   getDqRemediationVersions,
   getEnterpriseConnections,
@@ -28,7 +25,6 @@ import {
 
 import type {
   DqAiAnalysisResponse,
-  DqExecutionResponse,
   DqRemediationFeedbackResponse,
   DqRemediationGenerateResponse,
   DqRemediationArtifactPreference,
@@ -51,41 +47,6 @@ type GoogleSheetInfo = {
   column_count?: number | null;
 };
 
-function getAuthenticatedUserEmail(): string | null {
-  const token = localStorage.getItem("token");
-  if (!token) return null;
-
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-
-    const normalized = parts[1]
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-    const padded = normalized.padEnd(
-      Math.ceil(normalized.length / 4) * 4,
-      "=",
-    );
-
-    const payload = JSON.parse(
-      decodeURIComponent(
-        Array.from(atob(padded))
-          .map(
-            (character) =>
-              `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`,
-          )
-          .join(""),
-      ),
-    ) as Record<string, unknown>;
-
-    return typeof payload.email === "string" && payload.email.trim()
-      ? payload.email.trim()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 type GoogleSheetsConnectionTestResponse = {
   success: boolean;
   organization_id?: string;
@@ -104,14 +65,9 @@ type GoogleSheetsPreviewResponse = {
 
 type MappingState = Record<string, string>;
 
-type BillingExecutionEntitlements = {
-  steward_intelligence_enabled: boolean;
-  governed_regex_execution_enabled: boolean;
-};
-
-// Google Sheets governed write-back is intentionally limited to DQ rules
-// with an explicit deterministic REGEX execution contract.
-// Keep this list aligned with the backend execution service guardrails.
+// Execution readiness is intentionally limited to DQ rules with an explicit
+// deterministic Google Sheets REGEX contract. DQ Intelligence performs the
+// final backend validation and physical write-back.
 const GOOGLE_SHEETS_EXECUTABLE_REGEX_RULE_IDS = new Set<string>([
   "PRODUCT_VARIANT_STANDARDIZATION",
   "FULL_NAME_STANDARDIZATION",
@@ -239,59 +195,6 @@ function buildSuggestedMapping(
 export default function GoogleSheetsConnectionPanel() {
   const [spreadsheetUrl, setSpreadsheetUrl] =
     useState("");
-
-  const [billingEntitlements, setBillingEntitlements] =
-    useState<BillingExecutionEntitlements>({
-      steward_intelligence_enabled: false,
-      governed_regex_execution_enabled: false,
-    });
-
-  const [billingEntitlementsLoading, setBillingEntitlementsLoading] =
-    useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBillingEntitlements(): Promise<void> {
-      setBillingEntitlementsLoading(true);
-
-      try {
-        const payload = await getBillingStatus();
-        const entitlementPayload =
-          payload as unknown as Partial<BillingExecutionEntitlements>;
-
-        if (!cancelled) {
-          setBillingEntitlements({
-            steward_intelligence_enabled:
-              entitlementPayload.steward_intelligence_enabled === true,
-            governed_regex_execution_enabled:
-              entitlementPayload.governed_regex_execution_enabled === true,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setBillingEntitlements({
-            steward_intelligence_enabled: false,
-            governed_regex_execution_enabled: false,
-          });
-        }
-      } finally {
-        if (!cancelled) {
-          setBillingEntitlementsLoading(false);
-        }
-      }
-    }
-
-    void loadBillingEntitlements();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const governedGoogleSheetsExecutionEnabled =
-    billingEntitlements.steward_intelligence_enabled &&
-    billingEntitlements.governed_regex_execution_enabled;
 
   const [connection, setConnection] =
     useState<GoogleSheetsConnectionTestResponse | null>(
@@ -507,16 +410,6 @@ export default function GoogleSheetsConnectionPanel() {
 ] = useState<Set<string>>(new Set());
 
   const [
-    executionByRecommendationId,
-    setExecutionByRecommendationId,
-  ] = useState<Record<string, DqExecutionResponse>>({});
-
-  const [
-    executionLoadingIds,
-    setExecutionLoadingIds,
-  ] = useState<Set<string>>(new Set());
-
-  const [
     remediationVersionsByRecommendationId,
     setRemediationVersionsByRecommendationId,
   ] = useState<
@@ -598,8 +491,6 @@ export default function GoogleSheetsConnectionPanel() {
   setRemediationVersionsByRecommendationId({});
   setRemediationVersionsLoadingIds(new Set());
   setExpandedVersionHistoryIds(new Set());
-  setExecutionByRecommendationId({});
-  setExecutionLoadingIds(new Set());
 }
 
   function resetConnectionState(): void {
@@ -1018,14 +909,8 @@ export default function GoogleSheetsConnectionPanel() {
     setError(null);
     setSuccessMessage(null);
 
-    // A newly generated remediation version invalidates any prior execution
-    // result and any steward approval associated with the previous version.
-    setExecutionByRecommendationId((current) => {
-      const next = { ...current };
-      delete next[recommendationId];
-      return next;
-    });
-
+    // A newly generated remediation version invalidates steward approval
+    // associated with the previous version.
     setRemediationFeedbackByRecommendationId(
       (current) => {
         const next = { ...current };
@@ -1220,8 +1105,8 @@ export default function GoogleSheetsConnectionPanel() {
             : null;
 
       if (
-        decision === "REQUEST_CHANGES"
-        && !note?.trim()
+        decision === "REQUEST_CHANGES" &&
+        !note?.trim()
       ) {
         return;
       }
@@ -1257,172 +1142,22 @@ export default function GoogleSheetsConnectionPanel() {
             : "Remediation changes requested.",
       );
     } catch (err) {
-      setRemediationFeedbackLoadingIds((current) => {
-        const next = new Set(current);
-        next.delete(recommendationId);
-        return next;
-      });
       setError(
         err instanceof Error
           ? err.message
           : "Unable to submit remediation feedback.",
       );
-    }
-  }
-
-  async function handleExecuteApprovedGoogleSheetsRemediation(
-    recommendationId: string,
-    ruleId: string | null | undefined,
-  ): Promise<void> {
-    const remediation =
-      remediationByRecommendationId[recommendationId];
-    const remediationFeedback =
-      remediationFeedbackByRecommendationId[recommendationId];
-
-    const approvalStatus =
-      remediationFeedback?.approval_status?.trim().toUpperCase() ?? "";
-
-    const normalizedRuleId = String(ruleId ?? "")
-      .trim()
-      .toUpperCase();
-
-    const artifactType = String(
-      remediation?.artifact_type ?? "",
-    )
-      .trim()
-      .toUpperCase();
-
-    const safetyStatus = String(
-      remediation?.safety_status ?? "",
-    )
-      .trim()
-      .toUpperCase();
-
-    const remediationRegex =
-      remediation?.remediation_regex?.trim() ?? "";
-
-    if (billingEntitlementsLoading) {
-      setError(
-        "Governed execution access is still being verified. Try again in a moment.",
-      );
-      return;
-    }
-
-    if (!governedGoogleSheetsExecutionEnabled) {
-      setError(
-        "Governed Google Sheets execution requires Steward Intelligence. You can still generate, review, and manually apply the approved REGEX remediation.",
-      );
-      return;
-    }
-
-    if (!profileResult?.profile_run_id) {
-      setError("Run a Data Quality Profile before executing remediation.");
-      return;
-    }
-    if (!connectionId) {
-      setError("No active DEV/STG Google OAuth connection is available.");
-      return;
-    }
-    if (!connection?.spreadsheet_id) {
-      setError("Test the Google Sheet connection before executing remediation.");
-      return;
-    }
-    if (!selectedSheet.trim()) {
-      setError("Select the Google Sheet tab before executing remediation.");
-      return;
-    }
-    if (!remediation) {
-      setError("Generate remediation before execution.");
-      return;
-    }
-    if (artifactType !== "REGEX") {
-      setError(
-        "Google Sheets governed execution requires an approved REGEX remediation artifact.",
-      );
-      return;
-    }
-    if (!remediationRegex) {
-      setError(
-        "This REGEX remediation does not contain an executable governed pattern.",
-      );
-      return;
-    }
-    if (
-      !GOOGLE_SHEETS_EXECUTABLE_REGEX_RULE_IDS.has(
-        normalizedRuleId,
-      )
-    ) {
-      setError(
-        `DQ rule ${normalizedRuleId || "UNKNOWN"} does not have an executable Google Sheets REGEX contract. Steward review or a source-specific remediation is required.`,
-      );
-      return;
-    }
-    if (approvalStatus !== "APPROVED") {
-      setError("Steward approval is required before Google Sheets execution.");
-      return;
-    }
-    if (safetyStatus === "BLOCKED") {
-      setError("Blocked remediation cannot be executed.");
-      return;
-    }
-
-    const technicalApprovedBy = getAuthenticatedUserEmail();
-    if (!technicalApprovedBy) {
-      setError(
-        "Unable to resolve the authenticated user email for technical approval. Sign in again and retry.",
-      );
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Execute the approved REGEX remediation against Google Sheets tab "${selectedSheet}"?\n\nConfirm this is a values-only physical worksheet, not a Connected Sheets / BigQuery extract or formula-generated range.\n\nOnly governed matching cells will be updated. A re-profile will still be required to verify policy compliance.`,
-    );
-    if (!confirmed) return;
-
-    setExecutionLoadingIds((current) => {
-      const next = new Set(current);
-      next.add(recommendationId);
-      return next;
-    });
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      const response = await executeGoogleSheetsDqRemediation(
-        recommendationId,
-        {
-          profile_run_id: profileResult.profile_run_id,
-          connection_id: connectionId,
-          technical_approved_by: technicalApprovedBy,
-          spreadsheet_id: connection.spreadsheet_id,
-          sheet_name: selectedSheet,
-          header_row: 1,
-          confirm_execution: true,
+    } finally {
+      setRemediationFeedbackLoadingIds(
+        (current) => {
+          const next = new Set(current);
+          next.delete(recommendationId);
+          return next;
         },
       );
-
-      setExecutionByRecommendationId((current) => ({
-        ...current,
-        [recommendationId]: response,
-      }));
-
-      setSuccessMessage(
-        `Governed Google Sheets remediation executed successfully. ${response.rows_changed ?? response.rows_affected ?? 0} row(s) changed. Re-profile is required before policy compliance can be verified.`,
-      );
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to execute approved Google Sheets remediation.",
-      );
-    } finally {
-      setExecutionLoadingIds((current) => {
-        const next = new Set(current);
-        next.delete(recommendationId);
-        return next;
-      });
     }
   }
+
 
   return (
     <div
@@ -1671,26 +1406,28 @@ export default function GoogleSheetsConnectionPanel() {
                   marginBottom: 6,
                 }}
               >
-                Google Sheets Write-Back Requirement
+                Google Sheets Remediation Governance
               </div>
 
               <div>
-                Governed remediation requires a <b>values-only physical worksheet</b>.
-                If this worksheet comes from <b>Connected Sheets, a BigQuery extract,
-                ARRAYFORMULA, QUERY, IMPORTRANGE, or another formula-generated range</b>,
-                create a new worksheet and use <b>Paste special → Values only</b> before
-                profiling and remediation.
+                Profile Intelligence analyzes the worksheet, generates the remediation
+                artifact, and records the steward decision. Physical source-system
+                write-back is performed from DQ Intelligence after governed validation.
               </div>
 
               <div style={{ marginTop: 8 }}>
-                Connected or formula-generated worksheets may be used for analysis, but
-                they should remain read-only remediation sources.
+                Connected or formula-generated worksheets may be used for analysis. Any
+                approved execution must target a <b>values-only physical worksheet</b>.
+                For Connected Sheets, BigQuery extracts, ARRAYFORMULA, QUERY,
+                IMPORTRANGE, or other generated ranges, create a new worksheet and use
+                <b> Paste special → Values only</b> before execution.
               </div>
 
               <div style={{ marginTop: 8, color: "#92400e" }}>
-                <b>Quick setup:</b> Copy the source data and headers → create a new blank
-                worksheet → paste values only → select that worksheet here → Preview →
-                Profile → Generate Fix → Approve → Execute.
+                <b>Workflow:</b> Select the worksheet → Preview → Profile → Analyze with
+                AI → Generate Fix → Steward Approve → READY FOR EXECUTION. Continue in
+                DQ Intelligence to validate and execute the exact approved artifact
+                version.
               </div>
             </div>
 
@@ -2548,16 +2285,6 @@ export default function GoogleSheetsConnectionPanel() {
                   const remediationRejected =
                     approvalStatus === "REJECTED";
 
-                  const execution =
-                    executionByRecommendationId[
-                      recommendationId
-                    ];
-
-                  const executionLoading =
-                    executionLoadingIds.has(
-                      recommendationId,
-                    );
-
                   const normalizedRuleId = String(
                     recommendation.rule_id ?? "",
                   )
@@ -2591,7 +2318,7 @@ export default function GoogleSheetsConnectionPanel() {
                       normalizedRuleId,
                     );
 
-                  const isApprovedRegex =
+                  const readyForExecution =
                     remediationApproved &&
                     remediationArtifactType === "REGEX" &&
                     hasExecutableRegexPayload &&
@@ -2601,7 +2328,7 @@ export default function GoogleSheetsConnectionPanel() {
                   const isApprovedNonExecutableRegex =
                     remediationApproved &&
                     remediationArtifactType === "REGEX" &&
-                    !isApprovedRegex;
+                    !readyForExecution;
 
                   const feedbackSubmitted =
                     Boolean(remediationFeedback);
@@ -3070,144 +2797,42 @@ export default function GoogleSheetsConnectionPanel() {
                                 </div>
                               )}
 
-                              {isApprovedRegex && (
+                              {readyForExecution && (
                                 <div
                                   style={{
                                     marginTop: 6,
-                                    paddingTop: 12,
-                                    borderTop: "1px solid #bbf7d0",
-                                    display: "grid",
-                                    gap: 10,
+                                    padding: "12px 14px",
+                                    borderRadius: 10,
+                                    border: "1px solid #86efac",
+                                    background: "#f0fdf4",
+                                    color: "#166534",
+                                    fontSize: 12,
+                                    lineHeight: 1.55,
                                   }}
                                 >
-                                  <div
-                                    style={{
-                                      fontSize: 12,
-                                      color: "#475569",
-                                      lineHeight: 1.5,
-                                    }}
-                                  >
-                                    Approved REGEX remediation is eligible for governed Google Sheets execution. Execution does not mark the policy as met; re-profile evidence is required.
+                                  <b>READY FOR EXECUTION ✓</b>
+
+                                  <div style={{ marginTop: 6 }}>
+                                    Steward approval is complete. This exact approved
+                                    remediation version is available for governed execution
+                                    in DQ Intelligence.
                                   </div>
 
-                                  <div
-                                    style={{
-                                      padding: "10px 12px",
-                                      borderRadius: 10,
-                                      border: "1px solid #facc15",
-                                      background: "#fffbeb",
-                                      color: "#713f12",
-                                      fontSize: 12,
-                                      lineHeight: 1.5,
-                                    }}
-                                  >
-                                    <b>Before execution:</b> confirm that <b>{selectedSheet}</b> is a
-                                    values-only physical worksheet. Do not execute governed write-back
-                                    against Connected Sheets, BigQuery extracts, or formula-generated
-                                    ranges.
+                                  <div style={{ marginTop: 6 }}>
+                                    DQ Intelligence will revalidate the approved artifact,
+                                    Google connection, source worksheet, permissions,
+                                    execution eligibility, and target-cell write safety
+                                    before changing source data.
                                   </div>
 
-                                  {!execution ? (
-                                    governedGoogleSheetsExecutionEnabled ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          void handleExecuteApprovedGoogleSheetsRemediation(
-                                            recommendationId,
-                                            recommendation.rule_id,
-                                          );
-                                        }}
-                                        disabled={
-                                          billingEntitlementsLoading ||
-                                          executionLoading ||
-                                          !connectionId ||
-                                          !connection?.spreadsheet_id ||
-                                          !selectedSheet
-                                        }
-                                        style={{
-                                          ...primaryButtonStyle,
-                                          width: "fit-content",
-                                          opacity:
-                                            billingEntitlementsLoading ||
-                                            executionLoading ||
-                                            !connectionId ||
-                                            !connection?.spreadsheet_id ||
-                                            !selectedSheet
-                                              ? 0.6
-                                              : 1,
-                                          cursor:
-                                            billingEntitlementsLoading ||
-                                            executionLoading ||
-                                            !connectionId ||
-                                            !connection?.spreadsheet_id ||
-                                            !selectedSheet
-                                              ? "not-allowed"
-                                              : "pointer",
-                                        }}
-                                      >
-                                        {executionLoading
-                                          ? "Executing Governed Remediation..."
-                                          : "Execute Approved Remediation"}
-                                      </button>
-                                    ) : (
-                                      <div
-                                        style={{
-                                          padding: 12,
-                                          borderRadius: 10,
-                                          border: "1px solid #dbe4ee",
-                                          background: "#ffffff",
-                                          color: "#475569",
-                                          fontSize: 12,
-                                          lineHeight: 1.5,
-                                        }}
-                                      >
-                                        <b>Governed Automated Remediation — Steward Intelligence Required</b>
-                                        <div style={{ marginTop: 4 }}>
-                                          Your approved REGEX artifact remains available for manual
-                                          application. Automatic governed Google Sheets write-back is
-                                          available with Steward Intelligence.
-                                        </div>
-                                      </div>
-                                    )
-                                  ) : (
-                                    <div
-                                      style={{
-                                        padding: 12,
-                                        borderRadius: 10,
-                                        border: "1px solid #bfdbfe",
-                                        background: "#eff6ff",
-                                        display: "grid",
-                                        gap: 6,
-                                        fontSize: 12,
-                                        color: "#1e3a8a",
-                                      }}
-                                    >
-                                      <div style={{ fontWeight: 800 }}>
-                                        Governed Execution Complete ✓
-                                      </div>
-                                      <div>
-                                        <b>Target:</b>{" "}
-                                        {execution.execution_target ??
-                                          "GOOGLE_SHEETS"}
-                                      </div>
-                                      <div>
-                                        <b>Rows changed:</b>{" "}
-                                        {execution.rows_changed ??
-                                          execution.rows_affected ??
-                                          0}
-                                      </div>
-                                      <div>
-                                        <b>Policy verification:</b>{" "}
-                                        {execution.policy_verification_status ??
-                                          "PENDING_REPROFILE"}
-                                      </div>
-                                      <div style={{ fontWeight: 800 }}>
-                                        RE-PROFILE REQUIRED
-                                      </div>
-                                    </div>
-                                  )}
+                                  <div style={{ marginTop: 6 }}>
+                                    The execution target must be a values-only physical
+                                    worksheet, not Connected Sheets, a BigQuery extract, or
+                                    a formula-generated range.
+                                  </div>
                                 </div>
                               )}
+
                             </div>
                           ) : (
                             <>

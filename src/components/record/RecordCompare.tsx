@@ -15,6 +15,7 @@ type Props = {
   fields?: FieldKey[];
   labels?: Partial<Record<FieldKey, string>>;
   domain: DomainType;
+  authoritativeBands?: Partial<Record<FieldKey, MatchStatus>>;
 };
 
 type MatchStatus = "EXACT" | "SIMILAR" | "FUZZY" | "DIFFERENT" | "EMPTY";
@@ -86,6 +87,27 @@ PATIENT: [
     "sku",
     "source_system",
   ],
+
+  ORGANIZATION: [
+  "organization_entity_id",
+  "organization_code",
+  "organization_name",
+  "organization_type",
+  "parent_organization_id",
+  "organization_status",
+  "source_system",
+],
+LOCATION: [
+  "location_id",
+  "site_id",
+  "location_code",
+  "location_name",
+  "location_type",
+  "location_address",
+  "parent_location_id",
+  "source_system",
+],
+
 };
 
 const COMMON_NICKNAMES: Record<string, string[]> = {
@@ -116,6 +138,7 @@ function normalize(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v).trim();
 }
+
 
 function prettyLabel(k: string): string {
   return k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -369,7 +392,49 @@ function getFieldStatus(field: FieldKey,
 
   if (!aa && !bb) return "EMPTY";
   if (aa === bb) return "EXACT";
-  
+
+    // ORGANIZATION domain:
+  // authoritative identifiers and controlled attributes must not use
+  // generic fuzzy/string-similarity classification.
+  if (domain === "ORGANIZATION") {
+  const exactOnlyFields: FieldKey[] = [
+    "organization_entity_id",
+    "organization_code",
+    "organization_type",
+    "parent_organization_id",
+    "organization_status",
+  ];
+
+  if (exactOnlyFields.includes(field)) {
+    return "DIFFERENT";
+  }
+
+  if (field === "organization_name") {
+    const similarity = stringSimilarity(aa, bb);
+
+    if (similarity >= 0.70) {
+      return "SIMILAR";
+    }
+
+    if (similarity >= 0.50) {
+      return "FUZZY";
+    }
+
+    return "DIFFERENT";
+  }
+
+  if (field === "source_system") {
+    return "DIFFERENT";
+  }
+}
+  // LOCATION source-system values represent distinct originating systems.
+  // Source trust is evaluated separately by the entity-resolution engine.
+  if (
+    domain === "LOCATION" &&
+    field === "source_system"
+  ) {
+    return "DIFFERENT";
+  }
 
   // ---------------------------------------------------------
   // BANKING deterministic / controlled comparison rules
@@ -842,21 +907,28 @@ export default function RecordCompare({
   fields,
   labels,
   domain,
+  authoritativeBands,
 }: Props) {
+
 const compareFields =
   fields ?? DOMAIN_FIELDS[domain] ?? DOMAIN_FIELDS.CUSTOMER;
 
   const rows = useMemo(() => {
     return compareFields.map((key) => {
       const rawA = normalize(recordA[key]);
+
 const rawB = normalize(recordB[key]);
 
-const status = getFieldStatus(
-  key,
-  rawA,
-  rawB,
-  domain,
-);
+const authoritativeStatus = authoritativeBands?.[key];
+
+const status =
+  authoritativeStatus ??
+  getFieldStatus(
+    key,
+    rawA,
+    rawB,
+    domain,
+  );
 
 const a =
   key === "phone_number"
@@ -875,7 +947,7 @@ const b =
         status,
       };
     });
-  }, [recordA, recordB, domain, compareFields]);
+  }, [recordA, recordB, domain, compareFields, authoritativeBands]);
 
   const differentCount = rows.filter((r) => r.status === "DIFFERENT").length;
   const fuzzyCount = rows.filter((r) => r.status === "FUZZY").length;

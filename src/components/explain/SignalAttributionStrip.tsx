@@ -117,12 +117,12 @@ function normalizeSignals(
 
 function DecisionSummaryRow(props: {
   decisionConfidenceScore?: number | null;
-  automationTier?: string | null;
+  automationStatus?: string | null;
   primarySignal?: string | null;
   domain: DomainType;
 }) {
   const confidence = props.decisionConfidenceScore ?? 0;
-  const automationTier = props.automationTier ?? "UNKNOWN";
+  const automationStatus = props.automationStatus ?? "UNKNOWN";
   const primarySignal = props.primarySignal ?? "UNKNOWN";
 
   const confidenceTone =
@@ -168,7 +168,7 @@ function DecisionSummaryRow(props: {
           fontWeight: 700,
         }}
       >
-        Automation Tier: {automationTier.split("_").join(" ")}
+        Automation Status: {automationStatus.split("_").join(" ")}
       </div>
 
       <div
@@ -254,6 +254,7 @@ export function SignalAttributionStrip(props: {
   recordA: Record<string, unknown>;
   recordB: Record<string, unknown>;
   domain: DomainType;
+  automationStatus?: string | null;
 }) {
   const { result } = props;
   const signals = normalizeSignals(result);
@@ -364,7 +365,7 @@ export function SignalAttributionStrip(props: {
 
       <DecisionSummaryRow
         decisionConfidenceScore={result.decision_confidence_score}
-        automationTier={result.automation_tier}
+        automationStatus={result.automation_policy_status}
         primarySignal={result.primary_signal}
         domain={props.domain}
       />

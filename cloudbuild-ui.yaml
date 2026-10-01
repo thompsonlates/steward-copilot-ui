@@ -1,0 +1,16 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+    - 'build'
+    - '--build-arg'
+    - 'VITE_API_BASE_URL=${_VITE_API_BASE_URL}'
+    - '--build-arg'
+    - 'VITE_GOOGLE_CLIENT_ID=${_VITE_GOOGLE_CLIENT_ID}'
+    - '--build-arg'
+    - 'VITE_MICROSOFT_CLIENT_ID=${_VITE_MICROSOFT_CLIENT_ID}'
+    - '-t'
+    - 'us-east1-docker.pkg.dev/api-project-503305938314/cloud-run-source-deploy/steward-copilot-ui:latest'
+    - '.'
+
+images:
+- 'us-east1-docker.pkg.dev/api-project-503305938314/cloud-run-source-deploy/steward-copilot-ui:latest'

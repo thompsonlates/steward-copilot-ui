@@ -14,9 +14,12 @@ import type {
 
 import {
   executeDqRemediation,
-  generateDqRemediation,
+  executeGoogleSheetsDqRemediation,
+  executeOneDriveDqRemediation,
+  executeSnowflakeRegexDqRemediation,
   getEnterpriseConnections,
   validateDqExecution,
+  validateSnowflakeRegexDqExecution,
 } from "../api/client";
 
 
@@ -1897,9 +1900,38 @@ function ApprovedRemediationArtifact({
     approved.sql_dialect ||
     null;
 
-  const hasSqlArtifact = artifactType === "SQL" && Boolean(sql);
-  const hasRegexArtifact = artifactType === "REGEX" && Boolean(regex);
-  const isManualReview = artifactType === "MANUAL_REVIEW";
+    const hasSqlArtifact =
+    artifactType === "SQL" && Boolean(sql);
+
+  const hasRegexArtifact =
+    artifactType === "REGEX" && Boolean(regex);
+
+  const isManualReview =
+    artifactType === "MANUAL_REVIEW";
+
+  const sourceType = String(
+    approved.source_type || "",
+  )
+    .trim()
+    .toUpperCase();
+
+  const sourceLabel =
+    sourceType === "ONEDRIVE" ||
+    sourceType === "ONEDRIVE_EXCEL" ||
+    sourceType === "MICROSOFT_ONEDRIVE"
+      ? "ONEDRIVE EXCEL"
+      : sourceType === "GOOGLE" ||
+          sourceType === "GOOGLE_SHEETS" ||
+          sourceType === "GOOGLESHEETS"
+        ? "GOOGLE SHEETS"
+        : sourceType || null;
+
+  const artifactPlatformLabel =
+    hasSqlArtifact
+      ? sqlDialect
+      : hasRegexArtifact
+        ? sourceLabel
+        : null;
 
   const hasArtifact =
     hasSqlArtifact ||
@@ -1980,7 +2012,7 @@ function ApprovedRemediationArtifact({
             </span>
           )}
 
-          {sqlDialect && (
+          {artifactPlatformLabel && (
             <span
               style={{
                 padding: "4px 8px",
@@ -1992,7 +2024,7 @@ function ApprovedRemediationArtifact({
                 fontWeight: 850,
               }}
             >
-              {String(sqlDialect).toUpperCase()}
+            {String(artifactPlatformLabel,).toUpperCase()}
             </span>
           )}
         </div>
@@ -2126,6 +2158,13 @@ const EXECUTION_VENDORS = new Set([
   "SNOWFLAKE",
   "DATABRICKS",
   "BIGQUERY",
+  "GOOGLE",
+  "GOOGLE_SHEETS",
+  "ONEDRIVE",
+  "MICROSOFT",
+  "MICROSOFT_ONEDRIVE",
+  "SHAREPOINT",
+  "AZURE_SQL",
 ]);
 
 const EXECUTION_CAPABILITIES = new Set([
@@ -2173,13 +2212,58 @@ function isEligibleExecutionConnection(
     (capability) => capabilities.has(capability),
   );
 
+  const isSqlVendor = new Set([
+    "SNOWFLAKE",
+    "DATABRICKS",
+    "BIGQUERY",
+    "AZURE_SQL",
+  ]).has(vendor);
+
   return (
     connection.is_active === true &&
     String(connection.health_status || "").trim().toUpperCase() === "HEALTHY" &&
     EXECUTION_ENVIRONMENTS.has(environment) &&
     EXECUTION_VENDORS.has(vendor) &&
-    hasExecutionCapability
+    (!isSqlVendor || hasExecutionCapability)
   );
+}
+
+function isConnectionCompatibleWithSource(
+  connection: EnterpriseConnection,
+  sourceType: string,
+): boolean {
+  const vendor = String(connection.vendor || "").trim().toUpperCase();
+
+  if (sourceType === "GOOGLE_SHEETS") {
+    return vendor === "GOOGLE" || vendor === "GOOGLE_SHEETS";
+  }
+
+  if (sourceType === "ONEDRIVE_EXCEL") {
+    return new Set([
+      "ONEDRIVE",
+      "MICROSOFT",
+      "MICROSOFT_ONEDRIVE",
+      "SHAREPOINT",
+    ]).has(vendor);
+  }
+
+  if (sourceType === "AZURE_SQL") {
+    return vendor === "AZURE_SQL";
+  }
+
+  if (sourceType === "SNOWFLAKE") {
+    return vendor === "SNOWFLAKE";
+  }
+
+  if (sourceType === "DATABRICKS") {
+    return vendor === "DATABRICKS";
+  }
+
+  if (sourceType === "BIGQUERY") {
+    return vendor === "BIGQUERY";
+  }
+
+  return false;
 }
 
 function shortArtifactHash(value?: string | null): string {
@@ -2194,6 +2278,7 @@ function GovernedExecutionPanel({
   connectionsLoading,
   connectionsError,
   governedSqlExecutionEnabled,
+  governedRegexExecutionEnabled,
   billingEntitlementsLoading,
 }: {
   recommendation: DqApprovedRecommendationResponse;
@@ -2201,6 +2286,7 @@ function GovernedExecutionPanel({
   connectionsLoading: boolean;
   connectionsError: string | null;
   governedSqlExecutionEnabled: boolean;
+  governedRegexExecutionEnabled: boolean;
   billingEntitlementsLoading: boolean;
 }) {
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
@@ -2212,25 +2298,55 @@ function GovernedExecutionPanel({
   const [validationLoading, setValidationLoading] = useState(false);
   const [executionLoading, setExecutionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [sqlGenerating, setSqlGenerating] = useState(false);
-  const [sqlGenerationMessage, setSqlGenerationMessage] =
-    useState<string | null>(null);
+
+  const sourceType = String(recommendation.source_type || "")
+    .trim()
+    .toUpperCase();
+
+  const persistedConnectionId = String(
+    recommendation.connection_id || "",
+  ).trim();
+
+  const compatibleConnections = useMemo(
+    () =>
+      connections.filter(
+        (connection) =>
+          isConnectionCompatibleWithSource(connection, sourceType) &&
+          (!persistedConnectionId ||
+            connection.connection_id === persistedConnectionId),
+      ),
+    [connections, persistedConnectionId, sourceType],
+  );
 
   useEffect(() => {
     if (
+      persistedConnectionId &&
+      compatibleConnections.some(
+        (connection) => connection.connection_id === persistedConnectionId,
+      )
+    ) {
+      setSelectedConnectionId(persistedConnectionId);
+      return;
+    }
+
+    if (
       selectedConnectionId &&
-      connections.some(
+      compatibleConnections.some(
         (connection) => connection.connection_id === selectedConnectionId,
       )
     ) {
       return;
     }
 
-    setSelectedConnectionId(connections[0]?.connection_id || "");
-  }, [connections, selectedConnectionId]);
+    setSelectedConnectionId(compatibleConnections[0]?.connection_id || "");
+  }, [
+    compatibleConnections,
+    persistedConnectionId,
+    selectedConnectionId,
+  ]);
 
   const selectedConnection =
-    connections.find(
+    compatibleConnections.find(
       (connection) => connection.connection_id === selectedConnectionId,
     ) ?? null;
 
@@ -2260,76 +2376,38 @@ function GovernedExecutionPanel({
 
   const isSqlArtifact = artifactType === "SQL";
   const isRegexArtifact = artifactType === "REGEX";
-  const isManualReviewArtifact = artifactType === "MANUAL_REVIEW";
+  const isGoogleSheetsRegex =
+    isRegexArtifact && sourceType === "GOOGLE_SHEETS";
+  const isOneDriveRegex =
+    isRegexArtifact && sourceType === "ONEDRIVE_EXCEL";
+  const isSnowflakeRegex =
+    isRegexArtifact && sourceType === "SNOWFLAKE";
+
+  const hasRegexTarget =
+    Boolean(recommendation.connection_id?.trim()) &&
+    (isGoogleSheetsRegex
+      ? Boolean(recommendation.spreadsheet_id?.trim()) &&
+        Boolean(recommendation.sheet_name?.trim())
+        : isOneDriveRegex
+        ? Boolean(recommendation.drive_id?.trim()) &&
+          Boolean(recommendation.item_id?.trim()) &&
+          Boolean(recommendation.sheet_name?.trim())
+        : isSnowflakeRegex
+          ? Boolean(profileRunId) && Boolean(persistedConnectionId)
+          : false);
 
   const artifactExecutable =
-    isSqlArtifact &&
-    Boolean(recommendation.remediation_sql?.trim()) &&
+    ((isSqlArtifact && Boolean(recommendation.remediation_sql?.trim())) ||
+      (isRegexArtifact &&
+        Boolean(recommendation.remediation_regex?.trim()) &&
+        hasRegexTarget)) &&
     approvalStatus === "APPROVED" &&
     safetyStatus !== "BLOCKED";
-
-  const canOfferSqlGeneration =
-    !isRegexArtifact &&
-    !artifactExecutable;
 
   const invalidateValidation = () => {
     setValidationResult(null);
     setExecutionResult(null);
     setActionError(null);
-  };
-
-  const generateSqlRemediation = async () => {
-    if (!profileRunId) {
-      setActionError(
-        "This approved recommendation is missing profile_run_id and cannot generate SQL remediation.",
-      );
-      return;
-    }
-
-    invalidateValidation();
-    setSqlGenerating(true);
-    setActionError(null);
-    setSqlGenerationMessage(null);
-
-    try {
-      const result = await generateDqRemediation(
-        recommendation.recommendation_id,
-        {
-        profile_run_id: profileRunId,
-        connection_id:
-          selectedConnection?.connection_id || null,
-        source_table: "source_table",
-        sql_dialect: "GENERIC",
-        artifact_preference: "SQL",
-      },
-      );
-
-      const generatedArtifactType = String(
-        result.artifact_type || "",
-      ).toUpperCase();
-
-      if (generatedArtifactType === "SQL") {
-        setSqlGenerationMessage(
-          "A new SQL remediation version was generated. Steward approval is required on that new version before governed execution can continue.",
-        );
-      } else if (generatedArtifactType === "MANUAL_REVIEW") {
-        setSqlGenerationMessage(
-          "Corrective SQL was not generated because an authoritative replacement value is not available. Review the diagnostic SQL and confirm the required mapping before corrective remediation can be generated.",
-        );
-      } else {
-        setSqlGenerationMessage(
-          "A safe deterministic SQL remediation could not be generated. Manual remediation is required.",
-        );
-      }
-    } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Unable to generate SQL remediation.",
-      );
-    } finally {
-      setSqlGenerating(false);
-    }
   };
 
   const validateExecution = async () => {
@@ -2357,14 +2435,21 @@ function GovernedExecutionPanel({
     setExecutionResult(null);
 
     try {
-      const result = await validateDqExecution(
-        recommendation.recommendation_id,
-        {
-          profile_run_id: profileRunId,
-          connection_id: selectedConnection.connection_id,
-          technical_approved_by: approver,
-        },
-      );
+      const validationPayload = {
+        profile_run_id: profileRunId,
+        connection_id: selectedConnection.connection_id,
+        technical_approved_by: approver,
+      };
+
+      const result = isSnowflakeRegex
+        ? await validateSnowflakeRegexDqExecution(
+            recommendation.recommendation_id,
+            validationPayload,
+          )
+        : await validateDqExecution(
+            recommendation.recommendation_id,
+            validationPayload,
+          );
 
       setValidationResult(result);
     } catch (error) {
@@ -2379,7 +2464,14 @@ function GovernedExecutionPanel({
   };
 
   const executeRemediation = async () => {
-    if (!validationResult || !selectedConnection || !executionEnvironment) {
+    if (!selectedConnection || !executionEnvironment) {
+      return;
+    }
+
+    if ((isSqlArtifact || isSnowflakeRegex) && !validationResult) return;
+
+    if (!technicalApprover.trim()) {
+      setActionError("Technical approver is required before execution.");
       return;
     }
 
@@ -2390,15 +2482,19 @@ function GovernedExecutionPanel({
       return;
     }
 
-    if (!governedSqlExecutionEnabled) {
+    const executionEntitled = isSqlArtifact
+      ? governedSqlExecutionEnabled
+      : governedRegexExecutionEnabled;
+
+    if (!executionEntitled) {
       setActionError(
-        "Governed SQL execution requires Steward Intelligence. You can still generate, review, validate, and manually apply the approved SQL remediation.",
+        "Governed execution requires Steward Intelligence. The approved artifact remains available for review, but Copilot-managed execution is disabled.",
       );
       return;
     }
 
     const confirmed = window.confirm(
-      `Execute the exact approved remediation artifact in ${executionEnvironment}?\n\n` +
+      `Execute the exact approved remediation artifact in ${String(selectedConnection.vendor).toUpperCase()} ${executionEnvironment}?\n\n` +
         "Production execution remains blocked. This action may update target data in the selected non-production connection.",
     );
 
@@ -2408,15 +2504,43 @@ function GovernedExecutionPanel({
     setActionError(null);
 
     try {
-      const result = await executeDqRemediation(
-        recommendation.recommendation_id,
-        {
+      const basePayload = {
           profile_run_id: profileRunId,
           connection_id: selectedConnection.connection_id,
           technical_approved_by: technicalApprover.trim(),
           confirm_execution: true,
-        },
-      );
+        } as const;
+
+      const result = isGoogleSheetsRegex
+        ? await executeGoogleSheetsDqRemediation(
+            recommendation.recommendation_id,
+            {
+              ...basePayload,
+              spreadsheet_id: String(recommendation.spreadsheet_id),
+              sheet_name: String(recommendation.sheet_name),
+              header_row: recommendation.header_row ?? 1,
+            },
+          )
+        : isOneDriveRegex
+          ? await executeOneDriveDqRemediation(
+              recommendation.recommendation_id,
+              {
+                ...basePayload,
+                drive_id: String(recommendation.drive_id),
+                item_id: String(recommendation.item_id),
+                sheet_name: String(recommendation.sheet_name),
+                header_row: recommendation.header_row ?? 1,
+              },
+            )
+          : isSnowflakeRegex
+            ? await executeSnowflakeRegexDqRemediation(
+                recommendation.recommendation_id,
+                basePayload,
+              )
+          : await executeDqRemediation(
+              recommendation.recommendation_id,
+              basePayload,
+            );
 
       setExecutionResult(result);
     } catch (error) {
@@ -2431,6 +2555,7 @@ function GovernedExecutionPanel({
   };
 
   const canValidate =
+    (isSqlArtifact || isSnowflakeRegex) &&
     artifactExecutable &&
     Boolean(profileRunId) &&
     Boolean(selectedConnection) &&
@@ -2439,12 +2564,16 @@ function GovernedExecutionPanel({
     !executionLoading;
 
   const canExecute =
-    governedSqlExecutionEnabled &&
+    (isSqlArtifact
+      ? governedSqlExecutionEnabled
+      : governedRegexExecutionEnabled) &&
     !billingEntitlementsLoading &&
     artifactExecutable &&
-    validationResult?.execution_status === "VALIDATED_NOT_EXECUTED" &&
+    (!(isSqlArtifact || isSnowflakeRegex) ||
+      validationResult?.execution_status === "VALIDATED_NOT_EXECUTED") &&
     Boolean(selectedConnection) &&
     Boolean(executionEnvironment) &&
+    Boolean(technicalApprover.trim()) &&
     !executionLoading &&
     executionResult?.execution_status !== "SUCCEEDED";
 
@@ -2507,109 +2636,24 @@ function GovernedExecutionPanel({
         </span>
       </div>
 
-      {canOfferSqlGeneration && (
-        <>
-          <div
-            style={{
-              marginTop: 12,
-              padding: 11,
-              borderRadius: 10,
-              border: "1px solid #fde68a",
-              background: "#fffbeb",
-              color: "#92400e",
-              fontSize: 12,
-              lineHeight: 1.5,
-            }}
-          >
-            {isManualReviewArtifact
-              ? "This remediation requires steward review before any executable artifact can be created."
-              : "Enterprise governed execution requires a steward-approved, non-blocked SQL remediation artifact."}
-          </div>
-
-          <div
-            style={{
-              marginTop: 10,
-              padding: 11,
-              borderRadius: 10,
-              border: "1px solid #bfdbfe",
-              background: "#eff6ff",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                lineHeight: 1.5,
-                color: "#1e40af",
-              }}
-            >
-              Generate a controlled SQL remediation from this approved
-              recommendation. Regex logic may be embedded inside the SQL WHERE
-              clause when appropriate. A newly generated artifact must return
-              through steward approval before execution.
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                void generateSqlRemediation();
-              }}
-              disabled={sqlGenerating}
-              style={{
-                marginTop: 10,
-                padding: "9px 12px",
-                borderRadius: 9,
-                border: "1px solid #2563eb",
-                background: "#ffffff",
-                color: "#1d4ed8",
-                fontSize: 12,
-                fontWeight: 800,
-                opacity: sqlGenerating ? 0.6 : 1,
-                cursor: sqlGenerating ? "not-allowed" : "pointer",
-              }}
-            >
-              {sqlGenerating
-                ? "Generating SQL..."
-                : "Generate SQL Remediation"}
-            </button>
-
-            {sqlGenerationMessage && (
-              <div
-                style={{
-                  marginTop: 8,
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  color: "#166534",
-                  fontWeight: 650,
-                }}
-              >
-                {sqlGenerationMessage}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {artifactType === "REGEX" && (
+      {!artifactExecutable && (
         <div
           style={{
-            marginTop: 10,
+            marginTop: 12,
             padding: 11,
             borderRadius: 10,
-            border: "1px solid #bfdbfe",
-            background: "#eff6ff",
-            color: "#1e40af",
+            border: "1px solid #fde68a",
+            background: "#fffbeb",
+            color: "#92400e",
             fontSize: 12,
             lineHeight: 1.5,
-            fontWeight: 650,
           }}
         >
-          This approved REGEX artifact is not executed through the Enterprise SQL
-          governed-execution path. Use the source-specific governed execution flow
-          when the target supports an approved REGEX contract (for example, Google
-          Sheets). Generate SQL only when a separate corrective SQL artifact is
-          intentionally required.
+          This queue item does not contain a complete executable approved
+          artifact and source target. Generate and approve the remediation in
+          Profile Intelligence before governed execution can continue.
         </div>
-)}
+      )}
 
       <div
         style={{
@@ -2637,7 +2681,8 @@ function GovernedExecutionPanel({
             value={selectedConnectionId}
             disabled={
               connectionsLoading ||
-              connections.length === 0 ||
+              compatibleConnections.length === 0 ||
+              Boolean(persistedConnectionId) ||
               validationLoading ||
               executionLoading
             }
@@ -2656,14 +2701,14 @@ function GovernedExecutionPanel({
               fontSize: 13,
             }}
           >
-            {connections.length === 0 ? (
+            {compatibleConnections.length === 0 ? (
               <option value="">
                 {connectionsLoading
                   ? "Loading eligible connections…"
                   : "No eligible DEV / STG connections"}
               </option>
             ) : (
-              connections.map((connection) => (
+              compatibleConnections.map((connection) => (
                 <option
                   key={connection.connection_id}
                   value={connection.connection_id}
@@ -2770,7 +2815,10 @@ function GovernedExecutionPanel({
         </div>
       )}
 
-      {!billingEntitlementsLoading && !governedSqlExecutionEnabled && (
+      {!billingEntitlementsLoading &&
+        !(isSqlArtifact
+          ? governedSqlExecutionEnabled
+          : governedRegexExecutionEnabled) && (
         <div
           style={{
             marginTop: 12,
@@ -2785,9 +2833,9 @@ function GovernedExecutionPanel({
         >
           <b>Governed Automated Remediation — Steward Intelligence Required</b>
           <div style={{ marginTop: 4 }}>
-            The approved SQL artifact remains available for review, validation,
-            copy, and manual execution. Copilot-managed SQL execution against an
-            Enterprise Connection requires Steward Intelligence.
+            The approved artifact remains available for review and audit.
+            Copilot-managed execution against an Enterprise Connection requires
+            Steward Intelligence.
           </div>
         </div>
       )}
@@ -2801,30 +2849,33 @@ function GovernedExecutionPanel({
           alignItems: "center",
         }}
       >
-        <button
-          type="button"
-          onClick={validateExecution}
-          disabled={!canValidate}
-          style={{
-            border: "1px solid #2563eb",
-            borderRadius: 10,
-            padding: "9px 13px",
-            background: canValidate ? "#2563eb" : "#e2e8f0",
-            color: canValidate ? "#ffffff" : "#64748b",
-            fontSize: 12,
-            fontWeight: 850,
-            cursor: canValidate ? "pointer" : "not-allowed",
-          }}
-        >
-          {validationLoading
-            ? "VALIDATING…"
-            : executionEnvironment
-              ? `VALIDATE IN ${executionEnvironment}`
-              : "VALIDATE EXECUTION"}
-        </button>
+        {(isSqlArtifact || isSnowflakeRegex) && (
+          <button
+            type="button"
+            onClick={validateExecution}
+            disabled={!canValidate}
+            style={{
+              border: "1px solid #2563eb",
+              borderRadius: 10,
+              padding: "9px 13px",
+              background: canValidate ? "#2563eb" : "#e2e8f0",
+              color: canValidate ? "#ffffff" : "#64748b",
+              fontSize: 12,
+              fontWeight: 850,
+              cursor: canValidate ? "pointer" : "not-allowed",
+            }}
+          >
+            {validationLoading
+              ? "VALIDATING…"
+              : executionEnvironment
+                ? `VALIDATE IN ${executionEnvironment}`
+                : "VALIDATE EXECUTION"}
+          </button>
+        )}
 
-        {validationResult?.execution_status ===
-          "VALIDATED_NOT_EXECUTED" && (
+        {((isSqlArtifact &&
+          validationResult?.execution_status === "VALIDATED_NOT_EXECUTED") ||
+          isRegexArtifact) && (
           <button
             type="button"
             onClick={executeRemediation}
@@ -2842,7 +2893,13 @@ function GovernedExecutionPanel({
           >
             {executionLoading
               ? "EXECUTING…"
-              : `RUN IN ${executionEnvironment || "NON-PROD"}`}
+              : isSnowflakeRegex
+                ? `RUN APPROVED REGEX IN ${executionEnvironment || "NON-PROD"}`
+                : isRegexArtifact
+                ? `PREFLIGHT & RUN IN ${executionEnvironment || "NON-PROD"}`
+              : selectedConnection
+                ? `RUN IN ${String(selectedConnection.vendor).toUpperCase()} ${executionEnvironment || "NON-PROD"}`
+                : "RUN IN NON-PROD"}
           </button>
         )}
       </div>
@@ -2918,9 +2975,11 @@ function GovernedExecutionPanel({
               lineHeight: 1.5,
             }}
           >
-            No target SQL has been executed. Validation confirms the persisted
-            approved artifact, tenant-bound connection, safety controls, and
-            non-production environment.
+            {isSnowflakeRegex
+              ? `No target data has been changed. Preflight found ${
+                  validationResult.rows_affected ?? 0
+                } row(s) eligible for the exact approved Snowflake REGEX operation.`
+              : "No target SQL has been executed. Validation confirms the persisted approved artifact, tenant-bound connection, safety controls, and non-production environment."}
           </div>
         </div>
       )}
@@ -3057,6 +3116,11 @@ function ApprovedDqGovernanceQueue({
   const governedSqlExecutionEnabled =
     billingEntitlements.steward_intelligence_enabled &&
     billingEntitlements.governed_sql_execution_enabled;
+
+  // The API remains authoritative and enforces the dedicated governed REGEX
+  // entitlement. Steward Intelligence is the UI-level feature gate.
+  const governedRegexExecutionEnabled =
+    billingEntitlements.steward_intelligence_enabled;
 
   useEffect(() => {
     let cancelled = false;
@@ -3274,6 +3338,7 @@ function ApprovedDqGovernanceQueue({
                 connectionsLoading={connectionsLoading}
                 connectionsError={connectionsError}
                 governedSqlExecutionEnabled={governedSqlExecutionEnabled}
+                governedRegexExecutionEnabled={governedRegexExecutionEnabled}
                 billingEntitlementsLoading={billingEntitlementsLoading}
               />
 

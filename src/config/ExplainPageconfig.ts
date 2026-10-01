@@ -486,6 +486,24 @@ export function getDomainFieldLabels(domain: DomainType) {
         email: "email / identifier",
         address: "address / descriptor",
       };
+
+    case "LOCATION":
+      return {
+        first: "location_name",
+        last: "location_type",
+        dob: "location_code / site_id",
+        email: "organization_id",
+        address: "location_address",
+      };
+
+    case "ORGANIZATION":
+      return {
+        first: "organization_name",
+        last: "organization_type",
+        dob: "organization_code",
+        email: "parent_organization_id",
+        address: "organization_status",
+      };
   }
 }
 
@@ -505,5 +523,11 @@ export function getDomainMemberIdLabel(domain: DomainType): string {
 
     default:
       return "Member ID";
+
+    case "LOCATION":
+      return "Location ID";
+
+    case "ORGANIZATION":
+      return "Organization ID";
   }
 }

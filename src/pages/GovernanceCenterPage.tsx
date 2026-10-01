@@ -903,6 +903,8 @@ export default function GovernanceCenterPage({
                       ["SUPPLIER", "Supplier"],
                       ["BANKING", "Banking"],
                       ["CUSTOMER", "Customer"],
+                      ["ORGANIZATION", "Organization"],
+                      ["LOCATION", "Location"],
                     ].map(([value, label]) => {
                       const enabled =
                         enabledDomains.includes(value);

@@ -13,7 +13,6 @@ import UniversalProfileIntelligence
 
 
 import {
-  executeOneDriveDqRemediation,
   generateDqRemediation,
   getDqRemediationVersions,
   getEnterpriseConnections,
@@ -27,7 +26,6 @@ import {
 
 import type {
   DqAiAnalysisResponse,
-  DqExecutionResponse,
   DqRemediationArtifactPreference,
   DqRemediationFeedbackResponse,
   DqRemediationGenerateResponse,
@@ -67,46 +65,6 @@ type OneDrivePreviewResponse = {
 };
 
 
-
-function getAuthenticatedUserEmail(): string | null {
-  const token = localStorage.getItem("token");
-  if (!token) return null;
-
-  try {
-    const parts = token.split(".");
-    if (parts.length < 2) return null;
-
-    const normalized = parts[1]
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-
-    const padded = normalized.padEnd(
-      Math.ceil(normalized.length / 4) * 4,
-      "=",
-    );
-
-    const payload = JSON.parse(
-      decodeURIComponent(
-        Array.from(atob(padded))
-          .map(
-            (character) =>
-              `%${character
-                .charCodeAt(0)
-                .toString(16)
-                .padStart(2, "0")}`,
-          )
-          .join(""),
-      ),
-    ) as Record<string, unknown>;
-
-    return typeof payload.email === "string" &&
-      payload.email.trim()
-      ? payload.email.trim()
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 type MappingState = Record<string, string>;
 
@@ -396,20 +354,6 @@ export default function OneDriveConnectionPanel() {
     useState<OneDriveProfileResponse | null>(
       null,
     );
-
-  const [
-  executionLoadingIds,
-  setExecutionLoadingIds,
-] = useState<Set<string>>(
-  () => new Set<string>(),
-);
-
-  const [
-    executionByRecommendationId,
-    setExecutionByRecommendationId,
-  ] = useState<Record<string, DqExecutionResponse>>(
-    {},
-  );
 
   const [aiAnalyzing, setAiAnalyzing] =
     useState(false);
@@ -929,182 +873,6 @@ export default function OneDriveConnectionPanel() {
 
 
 
-  async function handleExecuteOneDriveRemediation(
-  recommendationId: string,
-  artifactType: string | null | undefined,
-  remediationRegex: string | null | undefined,
-  ruleId: string | null | undefined,
-  approvalStatus: string | null | undefined,
-  safetyStatus: string | null | undefined,
-): Promise<void> {
-  if (!profileResult) {
-    setError(
-      "Run the OneDrive Excel data quality profile before governed execution.",
-    );
-    return;
-  }
-
-  if (!connectionId) {
-    setError(
-      "Microsoft OAuth connection is not available.",
-    );
-    return;
-  }
-
-  if (!selectedSheet) {
-    setError(
-      "Select the Excel worksheet before governed execution.",
-    );
-    return;
-  }
-
-  if (
-    !profileResult.drive_id ||
-    !profileResult.item_id
-  ) {
-    setError(
-      "The profiled Microsoft workbook identity is unavailable. Re-run the profile before execution.",
-    );
-    return;
-  }
-
-  const normalizedArtifactType = String(
-    artifactType || "",
-  )
-    .trim()
-    .toUpperCase();
-
-  const normalizedRuleId = String(
-    ruleId || "",
-  )
-    .trim()
-    .toUpperCase();
-
-  if (normalizedArtifactType !== "REGEX") {
-    setError(
-      "OneDrive Excel governed execution requires an approved REGEX remediation artifact.",
-    );
-    return;
-  }
-
-  if (!remediationRegex) {
-    setError(
-      "This REGEX remediation does not contain an executable governed pattern.",
-    );
-    return;
-  }
-
-  if (
-    !ONEDRIVE_DETERMINISTIC_REGEX_RULES.has(
-      normalizedRuleId,
-    )
-  ) {
-    setError(
-      `DQ rule ${
-        normalizedRuleId || "UNKNOWN"
-      } does not have an executable OneDrive Excel REGEX contract.`,
-    );
-    return;
-  }
-
-  if (
-    String(approvalStatus || "")
-      .trim()
-      .toUpperCase() !== "APPROVED"
-  ) {
-    setError(
-      "Steward approval is required before OneDrive Excel execution.",
-    );
-    return;
-  }
-
-  if (
-    String(safetyStatus || "")
-      .trim()
-      .toUpperCase() === "BLOCKED"
-  ) {
-    setError(
-      "Blocked remediation cannot be executed.",
-    );
-    return;
-  }
-
-  const technicalApprovedBy =
-    getAuthenticatedUserEmail();
-
-  if (!technicalApprovedBy) {
-    setError(
-      "Unable to resolve the authenticated user email for technical approval. Sign in again and retry.",
-    );
-    return;
-  }
-
-  const confirmed = window.confirm(
-    `Execute the approved REGEX remediation against OneDrive Excel worksheet "${selectedSheet}"?\n\nOnly governed matching cells will be updated. Formula and unsafe targets remain subject to backend write-safety checks.\n\nA re-profile will be required to verify policy compliance.`,
-  );
-
-  if (!confirmed) return;
-
-  setExecutionLoadingIds((current) => {
-    const next = new Set(current);
-    next.add(recommendationId);
-    return next;
-  });
-
-  setError(null);
-  setSuccessMessage(null);
-
-  try {
-    const response =
-      await executeOneDriveDqRemediation(
-        recommendationId,
-        {
-          profile_run_id:
-            profileResult.profile_run_id,
-          connection_id:
-            connectionId,
-          technical_approved_by:
-            technicalApprovedBy,
-          drive_id:
-            profileResult.drive_id,
-          item_id:
-            profileResult.item_id,
-          sheet_name:
-            selectedSheet,
-          header_row: 1,
-          confirm_execution: true,
-        },
-      );
-
-    setExecutionByRecommendationId(
-      (current) => ({
-        ...current,
-        [recommendationId]: response,
-      }),
-    );
-
-    setSuccessMessage(
-      `Governed OneDrive Excel remediation executed successfully. ${
-        response.rows_changed ??
-        response.rows_affected ??
-        0
-      } row(s) changed. Re-profile is required before policy compliance can be verified.`,
-    );
-  } catch (err) {
-    setError(
-      err instanceof Error
-        ? err.message
-        : "Unable to execute approved OneDrive Excel remediation.",
-    );
-  } finally {
-    setExecutionLoadingIds((current) => {
-      const next = new Set(current);
-      next.delete(recommendationId);
-      return next;
-    });
-  }
-}
-
   async function handleGenerateRemediation(
     recommendationId: string,
     artifactPreference: DqRemediationArtifactPreference = "AUTO",
@@ -1619,25 +1387,25 @@ export default function OneDriveConnectionPanel() {
                   marginBottom: 6,
                 }}
               >
-                OneDrive Excel Write-Back Requirement
+                OneDrive Excel Remediation Governance
               </div>
 
               <div>
-                Governed remediation requires physical Excel target cells that are safe to update.
-                Formula cells are blocked by the governed OneDrive execution preflight.
-                If the selected worksheet is formula-generated or derived from another
-                workbook/source, create a values-only worksheet before execution.
+                Profile Intelligence analyzes the worksheet, generates the remediation
+                artifact, and records the steward decision. Physical source-system
+                write-back is performed from DQ Intelligence after governed validation.
               </div>
 
               <div style={{ marginTop: 8 }}>
-                Formula-driven worksheets may be used for analysis, but governed write-back
-                should target physical source cells only.
+                Formula-driven worksheets may be used for analysis. Any approved execution
+                must target physical source cells that pass the DQ Intelligence preflight.
               </div>
 
               <div style={{ marginTop: 8, color: "#92400e" }}>
-                <b>Quick setup:</b> Select the Excel workbook → choose a physical worksheet →
-                Preview → Profile → Generate Fix → Approve. Governed write-back is currently locked while the OneDrive execution 
-                safety and audit path is being finalized.
+                <b>Workflow:</b> Select the Excel workbook → choose a worksheet → Preview →
+                Profile → Analyze with AI → Generate Fix → Steward Approve → READY FOR
+                EXECUTION. Continue in DQ Intelligence to validate and execute the exact
+                approved artifact version.
               </div>
             </div>
 
@@ -2528,7 +2296,7 @@ export default function OneDriveConnectionPanel() {
                       normalizedRuleId,
                     );
 
-                  const isApprovedRegex =
+                  const readyForExecution =
                     remediationApproved &&
                     remediationArtifactType === "REGEX" &&
                     hasExecutableRegexPayload &&
@@ -2538,7 +2306,7 @@ export default function OneDriveConnectionPanel() {
                   const isApprovedNonExecutableRegex =
                     remediationApproved &&
                     remediationArtifactType === "REGEX" &&
-                    !isApprovedRegex;
+                    !readyForExecution;
 
                   const feedbackSubmitted =
                     Boolean(remediationFeedback);
@@ -3207,7 +2975,7 @@ export default function OneDriveConnectionPanel() {
                                 </div>
                               )}
 
-                              {isApprovedRegex && (
+                              {readyForExecution && (
                               <div
                                 style={{
                                   marginTop: 6,
@@ -3219,186 +2987,30 @@ export default function OneDriveConnectionPanel() {
                               >
                                 <div
                                   style={{
+                                    padding: "12px 14px",
+                                    borderRadius: 10,
+                                    border: "1px solid #86efac",
+                                    background: "#f0fdf4",
+                                    color: "#166534",
                                     fontSize: 12,
-                                    color: "#475569",
-                                    lineHeight: 1.5,
+                                    lineHeight: 1.55,
                                   }}
                                 >
-                                  This approved REGEX remediation has a deterministic
-                                  OneDrive Excel execution contract. Governed write-back
-                                  will execute only against the exact workbook and worksheet
-                                  used for this profile.
-                                </div>
+                                  <b>READY FOR EXECUTION ✓</b>
 
-                                {executionByRecommendationId[
-                                  recommendation.recommendation_id
-                                ] ? (
-                                  <div
-                                    style={{
-                                      padding: "12px 14px",
-                                      borderRadius: 10,
-                                      border: "1px solid #93c5fd",
-                                      background: "#eff6ff",
-                                      color: "#1e40af",
-                                      fontSize: 12,
-                                      lineHeight: 1.55,
-                                    }}
-                                  >
-                                    <b>Governed OneDrive Remediation Executed ✓</b>
-
-                                    <div style={{ marginTop: 6 }}>
-                                      The steward-approved remediation was successfully written
-                                      back to the source OneDrive Excel workbook.
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        marginTop: 10,
-                                        display: "grid",
-                                        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                                        gap: 8,
-                                      }}
-                                    >
-                                      <div>
-                                        <b>Rows Evaluated</b>
-                                        <div>
-                                          {executionByRecommendationId[
-                                            recommendation.recommendation_id
-                                          ].rows_evaluated ?? 0}
-                                        </div>
-                                      </div>
-
-                                      <div>
-                                        <b>Rows Changed</b>
-                                        <div>
-                                          {executionByRecommendationId[
-                                            recommendation.recommendation_id
-                                          ].rows_changed ??
-                                            executionByRecommendationId[
-                                              recommendation.recommendation_id
-                                            ].rows_affected ??
-                                            0}
-                                        </div>
-                                      </div>
-
-                                      <div>
-                                        <b>Rows Skipped</b>
-                                        <div>
-                                          {executionByRecommendationId[
-                                            recommendation.recommendation_id
-                                          ].rows_skipped ?? 0}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                  <div style={{ marginTop: 10 }}>
-                                  <b>Status:</b> SUCCEEDED
-                                </div>
-
-                                    <div style={{ marginTop: 4 }}>
-                                      <b>Policy Verification:</b>{" "}
-                                      {executionByRecommendationId[
-                                        recommendation.recommendation_id
-                                      ].policy_verification_status ?? "PENDING_REPROFILE"}
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        marginTop: 10,
-                                        paddingTop: 8,
-                                        borderTop: "1px solid #bfdbfe",
-                                      }}
-                                    >
-                                      Source data changed successfully. Re-profile is required
-                                      before policy compliance is considered verified.
-                                    </div>
+                                  <div style={{ marginTop: 6 }}>
+                                    Steward approval is complete. This exact approved
+                                    remediation version is available for governed execution
+                                    in DQ Intelligence.
                                   </div>
-                                ) : (
-                                  <>
-                                    <div
-                                      style={{
-                                        padding: "10px 12px",
-                                        borderRadius: 10,
-                                        border: "1px solid #bbf7d0",
-                                        background: "#f0fdf4",
-                                        color: "#166534",
-                                        fontSize: 12,
-                                        lineHeight: 1.5,
-                                      }}
-                                    >
-                                      <b>Governed OneDrive Write-Back Ready ✓</b>
 
-                                      <div style={{ marginTop: 4 }}>
-                                        Steward approval is complete and this rule has an
-                                        executable deterministic OneDrive Excel REGEX contract.
-                                      </div>
+                                  <div style={{ marginTop: 6 }}>
+                                    DQ Intelligence will revalidate the approved artifact,
+                                    source connection, permissions, execution eligibility,
+                                    and target-cell write safety before changing source data.
+                                  </div>
+                                </div>
 
-                                      <div style={{ marginTop: 6 }}>
-                                        The backend will revalidate tenant access, execution
-                                        entitlement, approval state, deterministic rule
-                                        eligibility, Microsoft connection safety, and target-cell
-                                        write safety before changing source data.
-                                      </div>
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      disabled={
-                                        executionLoadingIds.has(
-                                          recommendation.recommendation_id,
-                                        ) ||
-                                        !hasOneDriveDeterministicRegexContract ||
-                                        !profileResult?.drive_id ||
-                                        !profileResult?.item_id
-                                      }
-                                      onClick={() =>
-                                        void handleExecuteOneDriveRemediation(
-                                          recommendation.recommendation_id,
-                                          remediation.artifact_type,
-                                          remediation.remediation_regex,
-                                          normalizedRuleId,
-                                          approvalStatus,
-                                          remediation.safety_status,
-                                        )
-                                      }
-                                      title={
-                                        executionLoadingIds.has(
-                                          recommendation.recommendation_id,
-                                        )
-                                          ? "Governed OneDrive remediation is executing."
-                                          : "Execute the steward-approved deterministic remediation against the profiled OneDrive Excel workbook."
-                                      }
-                                      style={{
-                                        ...primaryButtonStyle,
-                                        width: "fit-content",
-                                        opacity:
-                                          executionLoadingIds.has(
-                                            recommendation.recommendation_id,
-                                          ) ||
-                                          !hasOneDriveDeterministicRegexContract ||
-                                          !profileResult?.drive_id ||
-                                          !profileResult?.item_id
-                                            ? 0.55
-                                            : 1,
-                                        cursor:
-                                          executionLoadingIds.has(
-                                            recommendation.recommendation_id,
-                                          ) ||
-                                          !hasOneDriveDeterministicRegexContract ||
-                                          !profileResult?.drive_id ||
-                                          !profileResult?.item_id
-                                            ? "not-allowed"
-                                            : "pointer",
-                                      }}
-                                    >
-                                      {executionLoadingIds.has(
-                                        recommendation.recommendation_id,
-                                      )
-                                        ? "Executing Governed Write-Back..."
-                                        : "Execute Approved OneDrive Remediation"}
-                                    </button>
-                                  </>
-                                )}
             </div>
           )}
                             </div>
@@ -4059,3 +3671,4 @@ export default function OneDriveConnectionPanel() {
     </div>
     )
   }
+

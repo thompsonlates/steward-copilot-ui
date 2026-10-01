@@ -87,8 +87,10 @@ export function AILearningPanel(props: {
     props.matchScore !== undefined &&
     props.matchScore >= 0.9 &&
     risk.includes("HIGH")
-      ? "High score, but policy risk is suppressing automation."
-      : "Policy and match evidence are generally aligned.";
+      ? "Strong match evidence is present, but high policy risk is suppressing automation."
+      : risk.includes("HIGH")
+        ? "High risk or conflicting evidence is suppressing automation."
+        : "Policy and match evidence are generally aligned.";
 
   return (
     <div
