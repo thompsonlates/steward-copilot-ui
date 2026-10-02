@@ -163,6 +163,146 @@ ORGANIZATION: [
 
 };
 
+type RecordCompareStatus =
+  | "EXACT"
+  | "SIMILAR"
+  | "FUZZY"
+  | "DIFFERENT"
+  | "EMPTY";
+
+type EntityResolutionSignal = {
+  signal_name?: string | null;
+  signal_band?: string | null;
+};
+
+function getAuthoritativeRecordCompareBands(
+  domain: DomainType,
+  signals: EntityResolutionSignal[] | null | undefined
+): Record<string, RecordCompareStatus> {
+  const signalList = Array.isArray(signals) ? signals : [];
+
+  const getBand = (
+    signalName: string
+  ): RecordCompareStatus | undefined => {
+    const signal = signalList.find(
+      (item) =>
+        String(item?.signal_name ?? "").toLowerCase() ===
+        signalName.toLowerCase()
+    );
+
+    const band = String(signal?.signal_band ?? "").toUpperCase();
+
+    return ["EXACT", "SIMILAR", "FUZZY", "DIFFERENT"].includes(band)
+      ? (band as RecordCompareStatus)
+      : undefined;
+  };
+
+  const definedBands = (
+    entries: Array<[string, RecordCompareStatus | undefined]>
+  ): Record<string, RecordCompareStatus> =>
+    Object.fromEntries(
+      entries.filter(
+        (entry): entry is [string, RecordCompareStatus] =>
+          entry[1] !== undefined
+      )
+    );
+
+  switch (domain) {
+    case "CUSTOMER":
+      return definedBands([
+        ["member_id", getBand("member_id_match")],
+        ["full_name", getBand("name_similarity")],
+        ["dob", getBand("dob_match")],
+        ["email", getBand("email_match")],
+        ["address", getBand("address_similarity")],
+        ["phone_number", getBand("phone_match")],
+      ]);
+
+    case "SUPPLIER":
+      return definedBands([
+        ["supplier_id", getBand("supplier_id_match")],
+        ["supplier_name", getBand("name_similarity")],
+        ["tax_id", getBand("tax_id_match")],
+        ["contact_email", getBand("contact_email_match")],
+        ["supplier_address", getBand("address_similarity")],
+      ]);
+
+    case "PRODUCT":
+      return definedBands([
+        ["product_id", getBand("product_id_match")],
+        ["gtin", getBand("gtin_match")],
+        ["sku", getBand("sku_match")],
+        ["product_name", getBand("name_similarity")],
+        ["product_variant", getBand("product_variant_similarity")],
+        ["item_category", getBand("item_category_similarity")],
+      ]);
+
+    case "BANKING":
+      return definedBands([
+        ["account_id", getBand("account_id_match")],
+        ["banking_customer_id", getBand("customer_id_match")],
+        [
+          "sap_business_partner_id",
+          getBand("sap_business_partner_id_match"),
+        ],
+        ["routing_number", getBand("routing_number_match")],
+        ["account_number_last4", getBand("account_number_last4_match")],
+        ["institution_name", getBand("institution_name_similarity")],
+        ["account_type", getBand("account_type_match")],
+        ["currency", getBand("currency_match")],
+        ["email", getBand("email_match")],
+        ["phone_number", getBand("phone_match")],
+      ]);
+
+    case "PATIENT":
+      return definedBands([
+        ["patient_id", getBand("patient_id_match")],
+        ["patient_dob", getBand("dob_match")],
+        ["patient_email", getBand("email_match")],
+        ["phone_number", getBand("phone_match")],
+        ["patient_address", getBand("address_similarity")],
+      ]);
+
+    case "PROVIDER":
+      return definedBands([
+        ["provider_id", getBand("provider_id_match")],
+        ["npi", getBand("npi_match")],
+        ["provider_email", getBand("provider_email_match")],
+        ["provider_address", getBand("address_similarity")],
+        ["phone_number", getBand("phone_match")],
+      ]);
+
+    case "LOCATION":
+      return definedBands([
+        ["location_id", getBand("location_id_match")],
+        ["site_id", getBand("site_id_match")],
+        ["location_code", getBand("location_code_match")],
+        ["location_name", getBand("location_name_similarity")],
+        ["location_address", getBand("address_similarity")],
+        ["parent_location_id", getBand("parent_location_id_match")],
+      ]);
+
+    case "ORGANIZATION":
+      return definedBands([
+        [
+          "organization_entity_id",
+          getBand("organization_entity_id_match"),
+        ],
+        ["organization_code", getBand("organization_code_match")],
+        ["organization_name", getBand("organization_name_similarity")],
+        ["organization_type", getBand("organization_type_match")],
+        [
+          "parent_organization_id",
+          getBand("parent_organization_id_match"),
+        ],
+        ["organization_status", getBand("organization_status_match")],
+      ]);
+
+    default:
+      return {};
+  }
+}
+
 
 const DOMAIN_OVERRIDE_REASON_OPTIONS: Record<DomainType, string[]> = {
   CUSTOMER: [
@@ -2364,59 +2504,10 @@ setB_source_system(
             overrideRate={getOverrideRateEstimate(result)}
           />
 <RecordCompare
-  authoritativeBands={
-  domain === "ORGANIZATION"
-    ? {
-        organization_name: (() => {
-          const signal = (
-            (result as any)?.entity_resolution_signals ?? []
-          ).find(
-            (item: any) =>
-              String(item?.signal_name ?? "").toLowerCase() ===
-              "organization_name_similarity"
-          );
-
-          const band = String(
-            signal?.signal_band ?? ""
-          ).toUpperCase();
-
-          return ["EXACT", "SIMILAR", "FUZZY", "DIFFERENT"].includes(band)
-            ? (band as "EXACT" | "SIMILAR" | "FUZZY" | "DIFFERENT")
-            : undefined;
-        })(),
-      }
-    : domain === "LOCATION"
-    ? (() => {
-        const signals =
-          (result as any)?.entity_resolution_signals ?? [];
-
-        const getBand = (signalName: string) => {
-          const signal = signals.find(
-            (item: any) =>
-              String(item?.signal_name ?? "").toLowerCase() ===
-              signalName.toLowerCase()
-          );
-
-          const band = String(
-            signal?.signal_band ?? ""
-          ).toUpperCase();
-
-          return ["EXACT", "SIMILAR", "FUZZY", "DIFFERENT"].includes(band)
-            ? (band as "EXACT" | "SIMILAR" | "FUZZY" | "DIFFERENT")
-            : undefined;
-        };
-
-        return {
-          location_id: getBand("location_id_match"),
-          site_id: getBand("site_id_match"),
-          location_code: getBand("location_code_match"),
-          location_name: getBand("location_name_similarity"),
-          location_address: getBand("address_similarity"),
-          parent_location_id: getBand("parent_location_id_match"),
-        };
-      })()
-    : undefined
-}
+  authoritativeBands={getAuthoritativeRecordCompareBands(
+    domain,
+    (result as any)?.entity_resolution_signals
+  )}
   recordA={
     domain === "PRODUCT"
       ? {

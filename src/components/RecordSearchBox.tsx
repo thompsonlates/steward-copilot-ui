@@ -12,6 +12,12 @@ function getSearchPlaceholder(domain: string): string {
       return "Search supplier by Tax ID, Supplier ID, name, email, phone...";
     case "PATIENT":
       return "Search patient by Patient ID, name, DOB, email...";
+    case "BANKING":
+      return "Search banking record by Account ID, Customer ID, SAP BP ID, routing number, institution...";
+    case "LOCATION":
+      return "Search location by Location ID, Site ID, code, name, address...";
+    case "ORGANIZATION":
+      return "Search organization by Organization ID, code, name, type...";
     default:
       return "Search customer by Member ID, name, DOB, email...";
   }
@@ -34,7 +40,11 @@ function getDisplayName(record: RecordSearchResult): string {
     record.display_name ||
     rec.product_name ||
     rec.supplier_name ||
+    rec.organization_name ||
+    rec.location_name ||
+    rec.institution_name ||
     fullName ||
+    rec.account_id ||
     record.mdm_id ||
     record.record_id ||
     "Selected Record"
