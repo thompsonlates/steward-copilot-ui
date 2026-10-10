@@ -1,10 +1,15 @@
 import type {
+  UniversalProfileRuleOpportunity,
   UniversalProfileRulesShadow,
 } from "../api/types";
 
 type Props = {
   enabled?: boolean;
   intelligence?: UniversalProfileRulesShadow | null;
+  onReviewCandidateRule?: (
+    opportunity: UniversalProfileRuleOpportunity,
+  ) => void;
+  reviewingCandidateField?: string | null;
 };
 
 function formatLabel(value?: string | null): string {
@@ -34,11 +39,43 @@ function formatConfidence(
 
   return `${percent}%`;
 }
+function formatEvidenceValue(
+  value: unknown,
+): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 
 export default function UniversalProfileIntelligence({
   enabled = false,
   intelligence,
+  onReviewCandidateRule,
+  reviewingCandidateField = null,
 }: Props) {
+  console.log("[UniversalProfileIntelligence DEBUG]", {
+    enabled,
+    hasIntelligence: Boolean(intelligence),
+    intelligence,
+  });
+
   if (!enabled || !intelligence) {
     return null;
   }
@@ -48,6 +85,7 @@ export default function UniversalProfileIntelligence({
   );
 
   const findings = intelligence.findings ?? [];
+  const candidateOpportunities =  intelligence.candidate_opportunities ?? [];
 
   // Aggregate row-level findings so large profiles do not render hundreds
   // of duplicate evidence cards for the same governed rule + field.
@@ -550,6 +588,342 @@ export default function UniversalProfileIntelligence({
             </div>
           )}
         </section>
+        {/* Pattern Discovery */}
+{candidateOpportunities.length > 0 && (
+  <section>
+    <div
+      style={{
+        marginBottom: 10,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          color: "#475569",
+          letterSpacing: "0.06em",
+        }}
+      >
+        PATTERN DISCOVERY
+      </div>
+
+      <div
+        style={{
+          padding: "4px 8px",
+          borderRadius: 999,
+          background: "#fffbeb",
+          border: "1px solid #fcd34d",
+          color: "#92400e",
+          fontSize: 10,
+          fontWeight: 800,
+        }}
+      >
+        STEWARD REVIEW REQUIRED
+      </div>
+    </div>
+
+    <div
+      style={{
+        marginBottom: 12,
+        fontSize: 12,
+        lineHeight: 1.5,
+        color: "#64748b",
+      }}
+    >
+      Repeating deterministic patterns that may justify
+      a profile-specific governed rule.
+    </div>
+
+    <div
+      style={{
+        display: "grid",
+        gap: 14,
+      }}
+    >
+      {candidateOpportunities.map(
+        (opportunity, opportunityIndex) => {
+          const confidence =
+            formatConfidence(
+              opportunity.confidence,
+            );
+
+          return (
+            <div
+              key={[
+                opportunity.field_name,
+                opportunity.pattern_summary,
+                opportunity.suggested_action,
+                opportunityIndex,
+              ].join("::")}
+              style={{
+                padding: 16,
+                border: "1px solid #c7d2fe",
+                borderRadius: 12,
+                background: "#f8faff",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      color: "#312e81",
+                    }}
+                  >
+                    {formatLabel(
+                      opportunity.pattern_summary,
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontSize: 12,
+                      color: "#475569",
+                    }}
+                  >
+                    Field:{" "}
+                    <strong>
+                      {opportunity.field_name}
+                    </strong>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 999,
+                      background: "#eef2ff",
+                      color: "#3730a3",
+                      fontSize: 11,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {
+                      opportunity.affected_record_count
+                    }{" "}
+                    repeating-pattern records
+                  </span>
+
+                  {confidence && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        color: "#475569",
+                      }}
+                    >
+                      {confidence} confidence
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  overflowX: "auto",
+                  border:
+                    "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  background: "#ffffff",
+                }}
+              >
+                <div
+                  style={{
+                    minWidth: 620,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "minmax(220px, 1fr) minmax(220px, 1fr) 90px",
+                      gap: 12,
+                      padding: "9px 12px",
+                      background: "#f8fafc",
+                      borderBottom:
+                        "1px solid #e2e8f0",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      color: "#64748b",
+                      letterSpacing:
+                        "0.04em",
+                    }}
+                  >
+                    <div>
+                      CURRENT BAD VALUE
+                    </div>
+
+                    <div>
+                      PROPOSED FIX
+                    </div>
+
+                    <div
+                      style={{
+                        textAlign: "right",
+                      }}
+                    >
+                      RECORDS
+                    </div>
+                  </div>
+
+                  {opportunity.evidence_examples.map(
+                    (evidence, evidenceIndex) => (
+                      <div
+                        key={evidenceIndex}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "minmax(220px, 1fr) minmax(220px, 1fr) 90px",
+                          gap: 12,
+                          padding: "10px 12px",
+                          borderBottom:
+                            evidenceIndex <
+                            opportunity
+                              .evidence_examples
+                              .length -
+                              1
+                              ? "1px solid #f1f5f9"
+                              : undefined,
+                          alignItems: "center",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontFamily:
+                              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                            fontSize: 12,
+                            color: "#9a3412",
+                            overflowWrap:
+                              "anywhere",
+                              whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {formatEvidenceValue(
+                            evidence.current_value,
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            fontFamily:
+                              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                            fontSize: 12,
+                            color: "#166534",
+                            overflowWrap:
+                              "anywhere",
+                              whiteSpace: "pre-wrap",
+                          }}
+                        >
+                          {formatEvidenceValue(
+                            evidence.proposed_value,
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            textAlign: "right",
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: "#334155",
+                          }}
+                        >
+                          {
+                            evidence.affected_record_count
+                          }
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: "#475569",
+                }}
+              >
+                {opportunity.explanation}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 12,
+                  display: "flex",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => onReviewCandidateRule?.(opportunity)}
+                  disabled={
+                    !onReviewCandidateRule ||
+                    reviewingCandidateField === opportunity.field_name
+                  }
+                  title={
+                    !onReviewCandidateRule
+                      ? "Candidate review is not available for this source."
+                      : "Create a governed candidate for steward review."
+                  }
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #cbd5e1",
+                    background:
+                      reviewingCandidateField === opportunity.field_name
+                        ? "#f8fafc"
+                        : "#ffffff",
+                    color:
+                      reviewingCandidateField === opportunity.field_name
+                        ? "#64748b"
+                        : "#0f172a",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor:
+                      !onReviewCandidateRule ||
+                      reviewingCandidateField === opportunity.field_name
+                        ? "not-allowed"
+                        : "pointer",
+                  }}
+                >
+                  {reviewingCandidateField === opportunity.field_name
+                    ? "Creating Candidate..."
+                    : "Review Candidate Rule"}
+                </button>
+              </div>
+            </div>
+          );
+        },
+      )}
+    </div>
+  </section>
+)}
 
         {isShadow && (
           <div

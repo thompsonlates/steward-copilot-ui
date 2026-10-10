@@ -1485,6 +1485,103 @@ export interface CsvProfileResponse
 
 }
 
+export type ProfileRuleAction =
+  | "STANDARDIZE_VALUE"
+  | "REPLACE_VALUE"
+  | "DELETE_VALUE"
+  | "FLAG_FOR_REVIEW";
+
+export type ProfileRuleOperator =
+  | "CONTAINS"
+  | "EQUALS"
+  | "REGEX"
+  | "IN";
+
+export type ProfileRuleCandidateStatus =
+  | "CANDIDATE"
+  | "PREVIEWED"
+  | "APPROVED"
+  | "REJECTED";
+
+export type ProfileRuleAnalyzeRequest = {
+  profile_id: string;
+  profile_run_id: string;
+  instruction: string;
+};
+
+export type ProfileRuleCandidateResponse = {
+  organization_id: string;
+  candidate_id: string;
+  profile_id: string;
+  profile_run_id: string;
+  domain: string;
+  field_name: string;
+  rule_name: string;
+  rule_type: string;
+  operator: ProfileRuleOperator;
+  comparison_value: unknown;
+  remediation_action: ProfileRuleAction;
+  replacement_value: unknown | null;
+  scope: "PROFILE";
+  status: ProfileRuleCandidateStatus;
+  steward_instruction: string;
+  ai_explanation?: string | null;
+  created_at: string;
+};
+
+export type ProfileRulePreviewItem = {
+  source_row_id: string;
+  record_id?: string | null;
+  field_name: string;
+  current_value: unknown;
+  suggested_value: unknown | null;
+  suggested_action: ProfileRuleAction;
+};
+
+export type ProfileRulePreviewResponse = {
+  organization_id: string;
+  candidate_id: string;
+  profile_id: string;
+  profile_run_id: string;
+  field_name: string;
+  records_evaluated: number;
+  affected_record_count: number;
+  preview: ProfileRulePreviewItem[];
+  source_mutated: boolean;
+};
+
+export type ProfileRuleApproveResponse = {
+  organization_id: string;
+  candidate_id: string;
+  rule_id: string;
+  profile_id: string;
+  profile_run_id: string;
+  scope: "PROFILE";
+  status: "ACTIVE";
+  version: number;
+  field_name: string;
+  remediation_action: ProfileRuleAction;
+  approved_by: string;
+  approved_at: string;
+  requires_reprofile: boolean;
+};
+
+export type ProfileRuleRejectRequest = {
+  reason: string;
+  false_positive_source_row_ids?: string[];
+  steward_guidance?: string | null;
+};
+
+export type ProfileRuleRejectResponse = {
+  organization_id: string;
+  candidate_id: string;
+  profile_id: string;
+  profile_run_id: string;
+  status: "REJECTED";
+  rejected_by?: string | null;
+  rejected_at?: string | null;
+};
+
 
 
 export interface GoogleSheetsProfileResponse
@@ -1495,7 +1592,7 @@ export interface GoogleSheetsProfileResponse
 
   organization_id?: string;
 
-
+  profile_id: string;
 
   profile_run_id: string;
 
@@ -1957,6 +2054,37 @@ export interface UniversalProfileFinding {
 
 }
 
+export interface UniversalProfileRuleOpportunityEvidence {
+  current_value: unknown;
+  proposed_value?: unknown | null;
+  affected_record_count: number;
+}
+
+export interface UniversalProfileRuleOpportunity {
+  field_name: string;
+  pattern_summary: string;
+  affected_record_count: number;
+
+  sample_values: unknown[];
+
+  evidence_examples:
+    UniversalProfileRuleOpportunityEvidence[];
+
+  suggested_rule_type: string;
+  suggested_operator: string;
+
+  suggested_comparison_value?: unknown | null;
+
+  suggested_action: string;
+
+  suggested_replacement_value?: unknown | null;
+
+  confidence: number;
+  explanation: string;
+
+  requires_steward_review: boolean;
+}
+
 
 
 export interface UniversalProfileRulesShadow {
@@ -1992,6 +2120,9 @@ export interface UniversalProfileRulesShadow {
 
 
   findings: UniversalProfileFinding[];
+  
+  candidate_opportunities?:
+  UniversalProfileRuleOpportunity[];
 
 }
 
@@ -2405,6 +2536,12 @@ export interface DqExecutionResponse {
   rows_skipped?: number | null;
 
   rows_affected?: number | null;
+
+  cells_updated?: number | null;
+  batch_count?: number | null;
+  batch_sizes?: number[];
+
+  audit_warning?: boolean;
 
   statement_id?: string | null;
 
@@ -3162,9 +3299,6 @@ export interface SearchRecordPayload {
   organization_type?: string | null;
   parent_organization_id?: string | null;
   organization_status?: string | null;
-
-
-
 }
 
 

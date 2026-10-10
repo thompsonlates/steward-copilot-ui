@@ -2219,11 +2219,14 @@ function isEligibleExecutionConnection(
     "AZURE_SQL",
   ]).has(vendor);
 
+  const requiresNonProdEnvironment = isSqlVendor;
+
   return (
     connection.is_active === true &&
     String(connection.health_status || "").trim().toUpperCase() === "HEALTHY" &&
-    EXECUTION_ENVIRONMENTS.has(environment) &&
     EXECUTION_VENDORS.has(vendor) &&
+    (!requiresNonProdEnvironment ||
+      EXECUTION_ENVIRONMENTS.has(environment)) &&
     (!isSqlVendor || hasExecutionCapability)
   );
 }
@@ -2235,8 +2238,13 @@ function isConnectionCompatibleWithSource(
   const vendor = String(connection.vendor || "").trim().toUpperCase();
 
   if (sourceType === "GOOGLE_SHEETS") {
-    return vendor === "GOOGLE" || vendor === "GOOGLE_SHEETS";
-  }
+  return (
+    vendor === "GOOGLE" ||
+    vendor === "GOOGLE_SHEETS" ||
+    vendor === "BIGQUERY" ||
+    vendor === "GOOGLE_BIGQUERY"
+  );
+}
 
   if (sourceType === "ONEDRIVE_EXCEL") {
     return new Set([
@@ -3023,22 +3031,57 @@ function GovernedExecutionPanel({
               gap: 8,
             }}
           >
+
             <InsightRow
-              title="Rows Affected"
-              value={executionResult.rows_affected ?? "—"}
-            />
-            <InsightRow
-              title="Vendor Status"
-              value={executionResult.vendor_status || "—"}
-            />
-            <InsightRow
-              title="Execution ID"
-              value={executionResult.execution_id}
-            />
-            <InsightRow
-              title="Statement / Job ID"
-              value={executionResult.statement_id || "—"}
-            />
+            title="Rows Evaluated"
+            value={executionResult.rows_evaluated?.toLocaleString() ?? "—"}
+          />
+          <InsightRow
+            title="Rows Changed"
+            value={executionResult.rows_changed?.toLocaleString() ?? "—"}
+          />
+          <InsightRow
+            title="Rows Skipped"
+            value={executionResult.rows_skipped?.toLocaleString() ?? "—"}
+          />
+          <InsightRow
+            title="Cells Updated"
+            value={
+              executionResult.cells_updated?.toLocaleString() ??
+              executionResult.rows_affected?.toLocaleString() ??
+              "—"
+            }
+          />
+          <InsightRow
+            title="Execution Batches"
+            value={executionResult.batch_count ?? "—"}
+          />
+          <InsightRow
+            title="Batch Sizes"
+            value={
+              executionResult.batch_sizes?.length
+                ? executionResult.batch_sizes
+                    .map((size) => size.toLocaleString())
+                    .join(" + ")
+                : "—"
+            }
+          />
+          <InsightRow
+            title="Policy Verification"
+            value={executionResult.policy_verification_status || "—"}
+          />
+          <InsightRow
+            title="Vendor Status"
+            value={executionResult.vendor_status || "—"}
+          />
+          <InsightRow
+            title="Execution ID"
+            value={executionResult.execution_id}
+          />
+          <InsightRow
+            title="Product Job ID"
+            value={executionResult.statement_id || "Not Applicable"}
+          />
           </div>
 
           <div

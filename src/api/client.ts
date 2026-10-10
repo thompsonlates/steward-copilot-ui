@@ -33,6 +33,12 @@ import type {
   AzureSqlPreviewResponse,
 
   AzureSqlProfileResponse,
+  ProfileRuleRejectResponse,
+  ProfileRuleApproveResponse,
+  ProfileRuleRejectRequest,
+  ProfileRuleAnalyzeRequest,
+  ProfileRuleCandidateResponse,
+  ProfileRulePreviewResponse,
 
 } from "./types";
 
@@ -691,6 +697,8 @@ export async function runGoogleSheetsProfile(
   payload: {
 
     connection_id: string;
+    profile_id?: string;
+    profile_name?: string;
 
     spreadsheet_url: string;
 
@@ -704,9 +712,9 @@ export async function runGoogleSheetsProfile(
 
     column_mappings: Array<{
 
-      source_column: string;
+    source_column: string;
 
-      target_field: string;
+    target_field: string;
 
     }>;
 
@@ -721,13 +729,90 @@ export async function runGoogleSheetsProfile(
     {
 
       method: "POST",
-
       body: JSON.stringify(payload),
 
     },
 
   );
 
+}
+
+export async function analyzeProfileRule(
+  request: ProfileRuleAnalyzeRequest,
+): Promise<ProfileRuleCandidateResponse> {
+  return api<ProfileRuleCandidateResponse>(
+    "/v1/dq/profile-rules/analyze",
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export async function createDiscoveryProfileRuleCandidate(
+  request: {
+    profile_id: string;
+    profile_run_id: string;
+    field_name: string;
+    pattern_summary: string;
+    rule_type: string;
+    operator: "CONTAINS" | "EQUALS" | "REGEX" | "IN";
+    comparison_value: unknown;
+    remediation_action:
+      | "STANDARDIZE_VALUE"
+      | "REPLACE_VALUE"
+      | "DELETE_VALUE"
+      | "FLAG_FOR_REVIEW";
+    replacement_value?: unknown | null;
+    confidence: number;
+    explanation: string;
+  },
+): Promise<ProfileRuleCandidateResponse> {
+  return api<ProfileRuleCandidateResponse>(
+    "/v1/dq/profile-rules/discovery-candidates",
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export async function previewProfileRule(
+  candidateId: string,
+): Promise<ProfileRulePreviewResponse> {
+  return api<ProfileRulePreviewResponse>(
+    `/v1/dq/profile-rules/${encodeURIComponent(candidateId)}/preview`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function approveProfileRule(
+  candidateId: string,
+): Promise<ProfileRuleApproveResponse> {
+  return api<ProfileRuleApproveResponse>(
+    `/v1/dq/profile-rules/${encodeURIComponent(candidateId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        approved: true,
+      }),
+    },
+  );
+}
+
+export async function rejectProfileRule(
+  candidateId: string,
+  request: ProfileRuleRejectRequest,
+): Promise<ProfileRuleRejectResponse> {
+  return api<ProfileRuleRejectResponse>(
+    `/v1/dq/profile-rules/${encodeURIComponent(candidateId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    },
+  );
 }
 
 

@@ -6,21 +6,28 @@ import React, {
 
 import type {
   GoogleSheetsProfileResponse,
+  UniversalProfileRuleOpportunity,
 } from "../api/types";
 
 import UniversalProfileIntelligence
   from "../components/UniversalProfileIntelligence";
 
+
 import {
+  analyzeProfileRule,
+  approveProfileRule,
   generateDqRemediation,
   getDqRemediationVersions,
   getEnterpriseConnections,
   previewGoogleSheet,
+  previewProfileRule,
+  rejectProfileRule,
   runDqAiAnalysis,
   runGoogleSheetsProfile,
   startGoogleOAuthAuthorization,
   submitDqRemediationFeedback,
   testGoogleSheetsConnection,
+  createDiscoveryProfileRuleCandidate,
 } from "../api/client";
 
 import type {
@@ -30,6 +37,9 @@ import type {
   DqRemediationArtifactPreference,
   DqRemediationVersion,
   EnterpriseConnection,
+  ProfileRuleApproveResponse,
+  ProfileRuleCandidateResponse,
+  ProfileRulePreviewResponse,
 } from "../api/types";
 
 
@@ -366,6 +376,59 @@ export default function GoogleSheetsConnectionPanel() {
       null,
     );
 
+  const [profileId, setProfileId] =
+    useState<string | null>(null);
+    const [
+    profileRuleInstruction,
+    setProfileRuleInstruction,
+  ] = useState("");
+
+  const [
+    profileRuleCandidate,
+    setProfileRuleCandidate,
+  ] = useState<ProfileRuleCandidateResponse | null>(
+    null,
+  );
+
+  const [
+    profileRulePreview,
+    setProfileRulePreview,
+  ] = useState<ProfileRulePreviewResponse | null>(
+    null,
+  );
+
+  const [
+    profileRuleApproval,
+    setProfileRuleApproval,
+  ] = useState<ProfileRuleApproveResponse | null>(
+    null,
+  );
+
+  const [
+    profileRuleAnalyzing,
+    setProfileRuleAnalyzing,
+  ] = useState(false);
+
+  const [
+    reviewingCandidateField,
+    setReviewingCandidateField,
+  ] = useState<string | null>(null);
+  
+  const [
+    profileRulePreviewing,
+    setProfileRulePreviewing,
+  ] = useState(false);
+
+  const [
+    profileRuleApproving,
+    setProfileRuleApproving,
+  ] = useState(false);
+
+  const [
+    profileRuleRejecting,
+    setProfileRuleRejecting,
+  ] = useState(false);
+
   const [aiAnalyzing, setAiAnalyzing] =
     useState(false);
 
@@ -484,14 +547,25 @@ export default function GoogleSheetsConnectionPanel() {
 
 
   function resetRemediationState(): void {
-  setRemediationByRecommendationId({});
-  setRemediationLoadingIds(new Set());
-  setRemediationFeedbackByRecommendationId({});
-  setRemediationFeedbackLoadingIds(new Set());
-  setRemediationVersionsByRecommendationId({});
-  setRemediationVersionsLoadingIds(new Set());
-  setExpandedVersionHistoryIds(new Set());
+    setRemediationByRecommendationId({});
+    setRemediationLoadingIds(new Set());
+    setRemediationFeedbackByRecommendationId({});
+    setRemediationFeedbackLoadingIds(new Set());
+    setRemediationVersionsByRecommendationId({});
+    setRemediationVersionsLoadingIds(new Set());
+    setExpandedVersionHistoryIds(new Set());
 }
+  function resetProfileRuleEnhancement(): void {
+    setProfileRuleInstruction("");
+    setProfileRuleCandidate(null);
+    setProfileRulePreview(null);
+    setProfileRuleApproval(null);
+    setProfileRuleAnalyzing(false);
+    setProfileRulePreviewing(false);
+    setProfileRuleApproving(false);
+    setProfileRuleRejecting(false);
+}
+
 
   function resetConnectionState(): void {
     setConnection(null);
@@ -504,6 +578,7 @@ export default function GoogleSheetsConnectionPanel() {
     resetRemediationState();
     setSuccessMessage(null);
     setError(null);
+    resetProfileRuleEnhancement();
   }
 
   function handleDomainChange(
@@ -514,6 +589,7 @@ export default function GoogleSheetsConnectionPanel() {
     setAiAnalysis(null);
     setExpandedRecommendationIds(new Set());
     resetRemediationState();
+    setExpandedRecommendationIds(new Set());
     setSuccessMessage(null);
     setError(null);
 
@@ -778,16 +854,19 @@ export default function GoogleSheetsConnectionPanel() {
         }),
       );
 
+    
     setProfiling(true);
     setError(null);
     setSuccessMessage(null);
     setProfileResult(null);
     setAiAnalysis(null);
+    resetProfileRuleEnhancement();
 
     try {
       const response =
         await runGoogleSheetsProfile({
           connection_id: connectionId,
+          profile_id: profileId ?? undefined,
           spreadsheet_url:
             spreadsheetUrl.trim(),
           sheet_name: selectedSheet,
@@ -800,7 +879,8 @@ export default function GoogleSheetsConnectionPanel() {
 
       const typedResponse =
         response as GoogleSheetsProfileResponse;
-
+      
+      setProfileId(typedResponse.profile_id);
       setProfileResult(typedResponse);
 
       setSuccessMessage(
@@ -841,6 +921,281 @@ export default function GoogleSheetsConnectionPanel() {
     setExpandedRecommendationIds(new Set());
     setSuccessMessage(null);
   }
+
+  async function handleAnalyzeProfileRule(): Promise<void> {
+  const instruction =
+    profileRuleInstruction.trim();
+
+  if (!profileResult?.profile_run_id || !profileId) {
+    setError(
+      "Run a Data Quality Profile before analyzing a profile rule.",
+    );
+    return;
+  }
+
+  if (!instruction) {
+    setError(
+      "Describe the profile-specific rule you want to evaluate.",
+    );
+    return;
+  }
+
+  setProfileRuleAnalyzing(true);
+  setError(null);
+  setSuccessMessage(null);
+  setProfileRuleCandidate(null);
+  setProfileRulePreview(null);
+  setProfileRuleApproval(null);
+
+  try {
+    const response =
+      await analyzeProfileRule({
+        profile_id: profileId,
+        profile_run_id:
+          profileResult.profile_run_id,
+        instruction,
+      });
+
+    setProfileRuleCandidate(response);
+
+    setSuccessMessage(
+      "Profile rule candidate created. Preview the impact before approval.",
+    );
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Unable to analyze the profile rule.",
+    );
+  } finally {
+    setProfileRuleAnalyzing(false);
+  }
+}
+
+async function handleReviewDiscoveredCandidate(
+  opportunity: UniversalProfileRuleOpportunity,
+): Promise<void> {
+  if (!profileResult?.profile_run_id || !profileId) {
+    setError(
+      "Run a Data Quality Profile before reviewing a discovered rule.",
+    );
+    return;
+  }
+
+  if (opportunity.suggested_comparison_value == null) {
+    setError(
+      "This discovered pattern does not contain a governed comparison value.",
+    );
+    return;
+  }
+
+  setReviewingCandidateField(opportunity.field_name);
+  setError(null);
+  setSuccessMessage(null);
+  setProfileRuleCandidate(null);
+  setProfileRulePreview(null);
+  setProfileRuleApproval(null);
+
+  try {
+    const response =
+      await createDiscoveryProfileRuleCandidate({
+        profile_id: profileId,
+        profile_run_id:
+          profileResult.profile_run_id,
+        field_name: opportunity.field_name,
+        pattern_summary:
+          opportunity.pattern_summary,
+        rule_type:
+          opportunity.suggested_rule_type,
+        operator:
+          opportunity.suggested_operator as
+            | "CONTAINS"
+            | "EQUALS"
+            | "REGEX"
+            | "IN",
+        comparison_value:
+          opportunity.suggested_comparison_value,
+        remediation_action:
+          opportunity.suggested_action as
+            | "STANDARDIZE_VALUE"
+            | "REPLACE_VALUE"
+            | "DELETE_VALUE"
+            | "FLAG_FOR_REVIEW",
+        replacement_value:
+          opportunity.suggested_replacement_value ??
+          null,
+        confidence:
+          opportunity.confidence,
+        explanation:
+          opportunity.explanation,
+      });
+
+    setProfileRuleCandidate(response);
+
+    setSuccessMessage(
+      "Discovered pattern promoted to a governed profile rule candidate. Preview the impact before approval.",
+    );
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Unable to create the discovered profile rule candidate.",
+    );
+  } finally {
+    setReviewingCandidateField(null);
+  }
+}
+
+async function handlePreviewProfileRule(): Promise<void> {
+  if (!profileRuleCandidate) {
+    setError(
+      "Analyze a profile rule before previewing its impact.",
+    );
+    return;
+  }
+
+  setProfileRulePreviewing(true);
+  setError(null);
+  setSuccessMessage(null);
+
+  try {
+    const response =
+      await previewProfileRule(
+        profileRuleCandidate.candidate_id,
+      );
+
+    setProfileRulePreview(response);
+
+    setProfileRuleCandidate((current) =>
+      current
+        ? {
+            ...current,
+            status: "PREVIEWED",
+          }
+        : current,
+    );
+
+    setSuccessMessage(
+      `Profile rule preview completed. ${response.affected_record_count.toLocaleString()} of ${response.records_evaluated.toLocaleString()} records are affected.`,
+    );
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Unable to preview the profile rule.",
+    );
+  } finally {
+    setProfileRulePreviewing(false);
+  }
+}
+
+async function handleApproveProfileRule(): Promise<void> {
+  if (
+    !profileRuleCandidate ||
+    !profileRulePreview
+  ) {
+    setError(
+      "Preview the profile rule before approving it.",
+    );
+    return;
+  }
+
+  if (profileRulePreview.source_mutated) {
+    setError(
+      "Profile rule preview unexpectedly reports source mutation. Approval is blocked.",
+    );
+    return;
+  }
+
+  setProfileRuleApproving(true);
+  setError(null);
+  setSuccessMessage(null);
+
+  try {
+    const response =
+      await approveProfileRule(
+        profileRuleCandidate.candidate_id,
+      );
+
+    setProfileRuleApproval(response);
+
+    setProfileRuleCandidate((current) =>
+      current
+        ? {
+            ...current,
+            status: "APPROVED",
+          }
+        : current,
+    );
+
+    setSuccessMessage(
+      `Profile rule activated successfully as ${response.rule_id}, Version ${response.version}. Reprofile to evaluate the governed rule.`,
+    );
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Unable to approve the profile rule.",
+    );
+  } finally {
+    setProfileRuleApproving(false);
+  }
+}
+
+async function handleRejectProfileRule(): Promise<void> {
+  if (!profileRuleCandidate) {
+    return;
+  }
+
+  const reason = window.prompt(
+    "Why should this profile rule candidate be rejected?",
+  );
+
+  if (reason === null) {
+    return;
+  }
+
+  setProfileRuleRejecting(true);
+  setError(null);
+  setSuccessMessage(null);
+
+  if (reason.trim().length < 3) {
+  setError("Rejection reason must be at least 3 characters.");
+  return;
+    }
+
+    try {
+      await rejectProfileRule(
+        profileRuleCandidate.candidate_id,
+        {
+          reason: reason.trim(),
+          false_positive_source_row_ids: [],
+          steward_guidance: null,
+        },
+      );
+
+      setProfileRuleCandidate((current) =>
+        current
+          ? {
+              ...current,
+              status: "REJECTED",
+            }
+          : current,
+      );
+
+    setSuccessMessage(
+      "Profile rule candidate rejected. No governed rule was activated.",
+    );
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Unable to reject the profile rule.",
+    );
+  } finally {
+    setProfileRuleRejecting(false);
+  }
+}
 
   
   async function handleAnalyzeWithAi(): Promise<void> {
@@ -1333,6 +1688,7 @@ export default function GoogleSheetsConnectionPanel() {
                   setMapping({});
                   setProfileResult(null);
                   setAiAnalysis(null);
+                  resetProfileRuleEnhancement();
                   setSuccessMessage(null);
                   setError(null);
                 }}
@@ -1985,8 +2341,614 @@ export default function GoogleSheetsConnectionPanel() {
         <UniversalProfileIntelligence
           enabled={profileResult.universal_rules_shadow_enabled}
           intelligence={profileResult.universal_rules_shadow}
-        />
+          onReviewCandidateRule={
+            handleReviewDiscoveredCandidate
+          }
+          reviewingCandidateField={
+            reviewingCandidateField
+    }
+  />
+)}
+      {profileResult && profileId && (
+  <div style={cardStyle}>
+    <SectionTitle
+      title="Profile Rule Enhancement"
+      description="Teach this profile a governed, deterministic data quality rule. Analyze the instruction, preview affected records, and approve the rule before activation."
+    />
+
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 12,
+        border: "1px solid #dbeafe",
+        background: "#f8fbff",
+        fontSize: 12,
+        color: "#475569",
+        lineHeight: 1.55,
+      }}
+    >
+      <b>Scope:</b>{" "}
+      {connection?.spreadsheet_title ??
+        "Google Sheets"}
+      {" › "}
+      {domain}
+      {" › "}
+      {profileId}
+
+      <div style={{ marginTop: 5 }}>
+        Profile rule updates change governed
+        configuration only. They do not modify
+        source data.
+      </div>
+    </div>
+
+    {!profileRuleApproval &&
+      profileRuleCandidate?.status !==
+        "REJECTED" && (
+        <div style={{ marginTop: 16 }}>
+          <div
+            style={{
+              marginBottom: 6,
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#344054",
+            }}
+          >
+            Steward Instruction
+          </div>
+
+          <textarea
+            value={profileRuleInstruction}
+            onChange={(event) => {
+              setProfileRuleInstruction(
+                event.target.value,
+              );
+
+              if (profileRuleCandidate) {
+                setProfileRuleCandidate(null);
+                setProfileRulePreview(null);
+                setProfileRuleApproval(null);
+              }
+            }}
+            placeholder={`Example: Delete product variant values equal to "25   /L" because this value is invalid unit-of-measure data.`}
+            rows={4}
+            style={{
+              ...inputStyle,
+              resize: "vertical",
+              lineHeight: 1.55,
+            }}
+          />
+
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                void handleAnalyzeProfileRule();
+              }}
+              disabled={
+                profileRuleAnalyzing ||
+                !profileRuleInstruction.trim()
+              }
+              style={{
+                ...primaryButtonStyle,
+                opacity:
+                  profileRuleAnalyzing ||
+                  !profileRuleInstruction.trim()
+                    ? 0.55
+                    : 1,
+                cursor:
+                  profileRuleAnalyzing ||
+                  !profileRuleInstruction.trim()
+                    ? "not-allowed"
+                    : "pointer",
+              }}
+            >
+              {profileRuleAnalyzing
+                ? "Analyzing Rule..."
+                : "Analyze Rule"}
+            </button>
+          </div>
+        </div>
       )}
+
+    {profileRuleCandidate && (
+      <div
+        style={{
+          marginTop: 18,
+          padding: 16,
+          borderRadius: 14,
+          border: "1px solid #e2e8f0",
+          background: "#f8fafc",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 800,
+                color: "#172033",
+              }}
+            >
+              Proposed Profile Rule
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 12,
+                color: "#64748b",
+              }}
+            >
+              Candidate:{" "}
+              {profileRuleCandidate.candidate_id}
+            </div>
+          </div>
+
+          <span
+            style={{
+              padding: "4px 9px",
+              borderRadius: 999,
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              fontSize: 11,
+              fontWeight: 800,
+              color:
+                profileRuleCandidate.status ===
+                "APPROVED"
+                  ? "#166534"
+                  : profileRuleCandidate.status ===
+                      "REJECTED"
+                    ? "#b91c1c"
+                    : "#334155",
+            }}
+          >
+            {profileRuleCandidate.status}
+          </span>
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(4, minmax(140px, 1fr))",
+            gap: 10,
+          }}
+        >
+          {[
+            {
+              label: "Field",
+              value:
+                profileRuleCandidate.field_name,
+            },
+            {
+              label: "Operator",
+              value:
+                profileRuleCandidate.operator,
+            },
+            {
+              label: "Current Value",
+              value:
+                typeof profileRuleCandidate.comparison_value ===
+                "string"
+                  ? profileRuleCandidate.comparison_value
+                  : JSON.stringify(
+                      profileRuleCandidate.comparison_value,
+                    ),
+            },
+            {
+              label: "Action",
+              value:
+                profileRuleCandidate.remediation_action,
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              style={{
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid #e2e8f0",
+                background: "#ffffff",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  color: "#64748b",
+                }}
+              >
+                {item.label}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 5,
+                  fontSize: 13,
+                  fontWeight: 750,
+                  color: "#172033",
+                  overflowWrap: "anywhere",
+                  whiteSpace:
+                    item.label === "Current Value"
+                      ? "pre-wrap"
+                      : "normal",
+                }}
+              >
+                {item.value ?? "—"}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {profileRuleCandidate.ai_explanation && (
+          <div
+            style={{
+              marginTop: 12,
+              fontSize: 13,
+              color: "#475569",
+              lineHeight: 1.55,
+            }}
+          >
+            <b>Why this rule:</b>{" "}
+            {profileRuleCandidate.ai_explanation}
+          </div>
+        )}
+
+        {!profileRulePreview &&
+          profileRuleCandidate.status !==
+            "REJECTED" && (
+            <div style={{ marginTop: 14 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void handlePreviewProfileRule();
+                }}
+                disabled={profileRulePreviewing}
+                style={{
+                  ...primaryButtonStyle,
+                  opacity: profileRulePreviewing
+                    ? 0.6
+                    : 1,
+                  cursor: profileRulePreviewing
+                    ? "not-allowed"
+                    : "pointer",
+                }}
+              >
+                {profileRulePreviewing
+                  ? "Previewing Impact..."
+                  : "Preview Impact"}
+              </button>
+            </div>
+          )}
+      </div>
+    )}
+
+    {profileRulePreview && (
+      <div
+        style={{
+          marginTop: 16,
+          padding: 16,
+          borderRadius: 14,
+          border: "1px solid #dbe4ee",
+          background: "#ffffff",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 800,
+                color: "#172033",
+              }}
+            >
+              Impact Preview
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 12,
+                color: "#64748b",
+              }}
+            >
+              Deterministic preview only — source
+              data has not been changed.
+            </div>
+          </div>
+
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              color: "#334155",
+            }}
+          >
+            {profileRulePreview.affected_record_count.toLocaleString()}
+            {" / "}
+            {profileRulePreview.records_evaluated.toLocaleString()}
+            {" affected"}
+          </div>
+        </div>
+
+        {profileRulePreview.source_mutated && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid #fecaca",
+              background: "#fef2f2",
+              color: "#991b1b",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            Source mutation was reported during
+            preview. Approval is blocked.
+          </div>
+        )}
+
+        <div
+          style={{
+            marginTop: 14,
+            overflowX: "auto",
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+          }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 12,
+            }}
+          >
+            <thead>
+              <tr>
+                {[
+                  "Source Row",
+                  "Current Value",
+                  "Suggested Fix",
+                ].map((heading) => (
+                  <th
+                    key={heading}
+                    style={{
+                      padding: "10px 12px",
+                      textAlign: "left",
+                      background: "#f8fafc",
+                      borderBottom:
+                        "1px solid #e2e8f0",
+                      color: "#475569",
+                    }}
+                  >
+                    {heading}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {profileRulePreview.preview.map(
+                (item) => (
+                  <tr key={item.source_row_id}>
+                    <td
+                      style={{
+                        padding: "9px 12px",
+                        borderBottom:
+                          "1px solid #eef2f7",
+                      }}
+                    >
+                      {item.source_row_id}
+                    </td>
+
+                    <td
+                      style={{
+                        padding: "9px 12px",
+                        borderBottom:
+                          "1px solid #eef2f7",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {item.current_value ===
+                        null ||
+                      item.current_value ===
+                        undefined
+                        ? "NULL"
+                        : String(
+                            item.current_value,
+                          )}
+                    </td>
+
+                    <td
+                      style={{
+                        padding: "9px 12px",
+                        borderBottom:
+                          "1px solid #eef2f7",
+                      }}
+                    >
+                      {item.suggested_action ===
+                      "DELETE_VALUE" ? (
+                        <span
+                          style={{
+                            padding: "3px 8px",
+                            borderRadius: 999,
+                            background: "#fff7ed",
+                            color: "#9a3412",
+                            fontWeight: 800,
+                            fontSize: 11,
+                          }}
+                        >
+                          DELETE VALUE
+                        </span>
+                      ) : item.suggested_value ===
+                          null ||
+                        item.suggested_value ===
+                          undefined ? (
+                        "NULL"
+                      ) : (
+                        String(
+                          item.suggested_value,
+                        )
+                      )}
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {!profileRuleApproval &&
+          profileRuleCandidate?.status !==
+            "REJECTED" && (
+            <div
+              style={{
+                marginTop: 16,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  void handleApproveProfileRule();
+                }}
+                disabled={
+                  profileRuleApproving ||
+                  profileRuleRejecting ||
+                  profileRulePreview.source_mutated
+                }
+                style={{
+                  ...primaryButtonStyle,
+                  opacity:
+                    profileRuleApproving ||
+                    profileRuleRejecting ||
+                    profileRulePreview.source_mutated
+                      ? 0.55
+                      : 1,
+                  cursor:
+                    profileRuleApproving ||
+                    profileRuleRejecting ||
+                    profileRulePreview.source_mutated
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                {profileRuleApproving
+                  ? "Approving Rule..."
+                  : "Approve Rule Update"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void handleRejectProfileRule();
+                }}
+                disabled={
+                  profileRuleApproving ||
+                  profileRuleRejecting
+                }
+                style={{
+                  ...secondaryButtonStyle,
+                  opacity:
+                    profileRuleApproving ||
+                    profileRuleRejecting
+                      ? 0.55
+                      : 1,
+                }}
+              >
+                {profileRuleRejecting
+                  ? "Rejecting..."
+                  : "Reject"}
+              </button>
+            </div>
+          )}
+      </div>
+    )}
+
+      {profileRuleApproval && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: 16,
+            borderRadius: 14,
+            border: "1px solid #86efac",
+            background: "#f0fdf4",
+            color: "#166534",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 850,
+            }}
+          >
+            Profile Rule Active ✓
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              lineHeight: 1.6,
+            }}
+          >
+            <b>Rule:</b>{" "}
+            {profileRuleApproval.rule_id}
+            {" • "}
+            <b>Version:</b>{" "}
+            {profileRuleApproval.version}
+            {" • "}
+            <b>Scope:</b>{" "}
+            {profileRuleApproval.scope}
+            {" • "}
+            <b>Field:</b>{" "}
+            {profileRuleApproval.field_name}
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              lineHeight: 1.55,
+            }}
+          >
+            The governed profile rule is now active.
+            Source data was not changed. Run the
+            profile again to evaluate the new rule
+            against the current source.
+          </div>
+        </div>
+      )}
+    </div>
+  )}
 
       {profileResult && (
         <div
@@ -2016,6 +2978,7 @@ export default function GoogleSheetsConnectionPanel() {
                   ? "not-allowed"
                   : "pointer",
             }}
+          
           >
             {aiAnalyzing
               ? "Analyzing with AI..."
